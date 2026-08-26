@@ -1,0 +1,354 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.beam.sdk.metrics;
+
+import static org.apache.beam.vendor.guava.v32_1_2_jre.com.google.common.base.Preconditions.checkNotNull;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
+import java.util.regex.Pattern;
+import org.apache.beam.sdk.annotations.Internal;
+import org.apache.beam.sdk.lineage.LineageBase;
+import org.apache.beam.sdk.lineage.LineageOptions;
+import org.apache.beam.sdk.metrics.Metrics.MetricsFlag;
+import org.apache.beam.sdk.options.PipelineOptions;
+import org.apache.beam.sdk.options.PipelineOptionsFactory;
+import org.apache.beam.vendor.guava.v32_1_2_jre.com.google.common.annotations.VisibleForTesting;
+import org.apache.beam.vendor.guava.v32_1_2_jre.com.google.common.base.Splitter;
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Standard collection of metrics used to record source and sinks information for lineage tracking.
+ */
+public class Lineage {
+  public static final String LINEAGE_NAMESPACE = "lineage";
+  private static final Logger LOG = LoggerFactory.getLogger(Lineage.class);
+
+  private static volatile @Nullable Lineage sources;
+  private static volatile @Nullable Lineage sinks;
+  private static volatile @Nullable Class<? extends LineageBase> currentLineageType;
+
+  private static final Object INIT_LOCK = new Object();
+
+  // Reserved characters are backtick, colon, whitespace (space, \t, \n) and dot.
+  private static final Pattern RESERVED_CHARS = Pattern.compile("[:\\s.`]");
+
+  private final LineageBase delegate;
+
+  public enum LineageDirection {
+    SOURCE,
+    SINK
+  }
+
+  private Lineage(LineageBase delegate) {
+    this.delegate = checkNotNull(delegate, "delegate cannot be null");
+  }
+
+  @Internal
+  public static void setDefaultPipelineOptions(PipelineOptions options) {
+    checkNotNull(options, "options cannot be null");
+    Class<? extends LineageBase> requestedType = options.as(LineageOptions.class).getLineageType();
+
+    if (canSkipInit(requestedType)) {
+      return;
+    }
+    synchronized (INIT_LOCK) {
+      if (canSkipInit(requestedType)) {
+        return;
+      }
+      sources = createLineage(options, LineageDirection.SOURCE);
+      sinks = createLineage(options, LineageDirection.SINK);
+      currentLineageType = requestedType;
+      LOG.debug("Lineage initialized with type {}", requestedType);
+    }
+  }
+
+  private static boolean canSkipInit(@Nullable Class<? extends LineageBase> requestedType) {
+    if (sources == null) {
+      return false;
+    }
+    // When no type is requested, preserve whatever is already initialized.
+    // When a type is requested, only re-init if it differs from the active type.
+    return requestedType == null || requestedType.equals(currentLineageType);
+  }
+
+  private static Lineage createLineage(PipelineOptions options, LineageDirection direction) {
+    Class<? extends LineageBase> lineageClass = options.as(LineageOptions.class).getLineageType();
+
+    if (lineageClass != null) {
+      try {
+        LineageBase lineage =
+            lineageClass
+                .getDeclaredConstructor(PipelineOptions.class, LineageDirection.class)
+                .newInstance(options, direction);
+        LOG.info("Using {} for lineage direction {}", lineageClass.getName(), direction);
+        return new Lineage(lineage);
+      } catch (ReflectiveOperationException e) {
+        throw new IllegalArgumentException(
+            "Failed to instantiate lineage implementation: "
+                + lineageClass.getName()
+                + ". The class must have a public constructor accepting "
+                + "(PipelineOptions, Lineage.LineageDirection).",
+            e);
+      }
+    }
+
+    LOG.debug("Using default Metrics-based lineage for direction {}", direction);
+    LineageBase defaultLineage =
+        MetricsFlag.lineageRollupEnabled()
+            ? new BoundedTrieMetricsLineage(options, direction)
+            : new StringSetMetricsLineage(options, direction);
+    return new Lineage(defaultLineage);
+  }
+
+  /** {@link Lineage} representing sources and optionally side inputs. */
+  public static Lineage getSources() {
+    Lineage localSources = sources;
+    if (localSources == null) {
+      return createDefaultLineage(LineageDirection.SOURCE);
+    }
+    return localSources;
+  }
+
+  /** {@link Lineage} representing sinks. */
+  public static Lineage getSinks() {
+    Lineage localSinks = sinks;
+    if (localSinks == null) {
+      return createDefaultLineage(LineageDirection.SINK);
+    }
+    return localSinks;
+  }
+
+  private static Lineage createDefaultLineage(LineageDirection direction) {
+    return createLineage(PipelineOptionsFactory.create(), direction);
+  }
+
+  @VisibleForTesting
+  static Iterable<String> getFQNParts(
+      String system,
+      @Nullable String subtype,
+      Iterable<String> segments,
+      @Nullable String lastSegmentSep) {
+
+    List<String> parts = new ArrayList<>();
+    parts.add(system + ":");
+    if (subtype != null) {
+      parts.add(subtype + ":");
+    }
+
+    if (segments != null) {
+      Iterator<String> iterator = segments.iterator();
+      String previousSegment = null;
+      while (iterator.hasNext()) {
+        if (previousSegment != null) {
+          parts.add(wrapSegment(previousSegment) + ".");
+        }
+        previousSegment = iterator.next();
+      }
+
+      if (previousSegment != null) {
+        if (lastSegmentSep != null) {
+          List<String> subSegments =
+              Splitter.onPattern(lastSegmentSep).splitToList(wrapSegment(previousSegment));
+          for (int i = 0; i < subSegments.size() - 1; i++) {
+            parts.add(subSegments.get(i) + lastSegmentSep);
+          }
+          parts.add(subSegments.get(subSegments.size() - 1));
+        } else {
+          parts.add(wrapSegment(previousSegment));
+        }
+      }
+    }
+    return parts;
+  }
+
+  /**
+   * Add a FQN (fully-qualified name) to Lineage. Segments will be processed via {@link
+   * #getFQNParts}.
+   */
+  public void add(
+      String system,
+      @Nullable String subtype,
+      Iterable<String> segments,
+      @Nullable String lastSegmentSep) {
+    add(getFQNParts(system, subtype, segments, lastSegmentSep));
+  }
+
+  /**
+   * Add a FQN (fully-qualified name) to Lineage. Segments will be processed via {@link
+   * #getFQNParts}.
+   */
+  public void add(String system, Iterable<String> segments, @Nullable String lastSegmentSep) {
+    add(system, null, segments, lastSegmentSep);
+  }
+
+  /**
+   * Add a FQN (fully-qualified name) to Lineage. Segments will be processed via {@link
+   * #getFQNParts}.
+   */
+  public void add(String system, Iterable<String> segments) {
+    add(system, segments, null);
+  }
+
+  /**
+   * Adds the given fqn as lineage.
+   *
+   * @param rollupSegments should be an iterable of strings whose concatenation is a valid <a
+   *     href="https://cloud.google.com/data-catalog/docs/fully-qualified-names">Dataplex FQN </a>
+   *     which is already escaped.
+   *     <p>In particular, this means they will often have trailing delimiters.
+   */
+  public void add(Iterable<String> rollupSegments) {
+    delegate.add(rollupSegments);
+  }
+
+  /**
+   * Query {@link BoundedTrie} metrics from {@link MetricResults}.
+   *
+   * @param results FQNs from the result.
+   * @param type sources or sinks.
+   * @param truncatedMarker the marker to use to represent truncated FQNs.
+   * @return A flat representation of all FQNs. If the FQN was truncated then it has a trailing
+   *     truncatedMarker.
+   *     <p>NOTE: When using a custom Lineage plugin, this method will return empty results since
+   *     lineage is not stored in Metrics.
+   */
+  public static Set<String> query(MetricResults results, Type type, String truncatedMarker) {
+    MetricQueryResults lineageQueryResults = getLineageQueryResults(results, type);
+    Set<String> result = new HashSet<>();
+    truncatedMarker = truncatedMarker == null ? "*" : truncatedMarker;
+    for (MetricResult<BoundedTrieResult> metrics : lineageQueryResults.getBoundedTries()) {
+      try {
+        for (List<String> fqn : metrics.getCommitted().getResult()) {
+          String end = Boolean.parseBoolean(fqn.get(fqn.size() - 1)) ? truncatedMarker : "";
+          result.add(String.join("", fqn.subList(0, fqn.size() - 1)) + end);
+        }
+      } catch (UnsupportedOperationException unused) {
+        // MetricsResult.getCommitted throws this exception when runner support missing, just skip.
+      }
+      for (List<String> fqn : metrics.getAttempted().getResult()) {
+        String end = Boolean.parseBoolean(fqn.get(fqn.size() - 1)) ? truncatedMarker : "";
+        result.add(String.join("", fqn.subList(0, fqn.size() - 1)) + end);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Query {@link BoundedTrie} metrics from {@link MetricResults}.
+   *
+   * @param results FQNs from the result
+   * @param type sources or sinks
+   * @return A flat representation of all FQNs. If the FQN was truncated then it has a trailing '*'.
+   *     <p>NOTE: When using a custom Lineage plugin, this method will return empty results since
+   *     lineage is not stored in Metrics.
+   */
+  public static Set<String> query(MetricResults results, Type type) {
+    if (MetricsFlag.lineageRollupEnabled()) {
+      // If user accidentally end up specifying V1 type then override it with V2.
+      if (type == Type.SOURCE) {
+        type = Type.SOURCEV2;
+      }
+      if (type == Type.SINK) {
+        type = Type.SINKV2;
+      }
+      return query(results, type, "*");
+    } else {
+      return queryLineageV1(results, type);
+    }
+  }
+
+  /** Lineage metrics resource types. */
+  public enum Type {
+    // Used by StringSet to report lineage metrics
+    SOURCE("sources"),
+    SINK("sinks"),
+
+    // Used by BoundedTrie to report lineage metrics
+    SOURCEV2("sources_v2"),
+    SINKV2("sinks_v2");
+
+    private final String name;
+
+    Type(String name) {
+      this.name = name;
+    }
+
+    @Override
+    public String toString() {
+      return name;
+    }
+  }
+
+  /**
+   * Query {@link StringSet} metrics from {@link MetricResults}. This method is kept as-is from
+   * previous Beam release for removal once BoundedTrie is made default.
+   */
+  private static Set<String> queryLineageV1(MetricResults results, Type type) {
+    MetricQueryResults lineageQueryResults = getLineageQueryResults(results, type);
+    Set<String> result = new HashSet<>();
+    for (MetricResult<StringSetResult> metrics : lineageQueryResults.getStringSets()) {
+      try {
+        result.addAll(metrics.getCommitted().getStringSet());
+      } catch (UnsupportedOperationException unused) {
+        // MetricsResult.getCommitted throws this exception when runner support missing, just skip.
+      }
+      result.addAll(metrics.getAttempted().getStringSet());
+    }
+    return result;
+  }
+
+  /** @return {@link MetricQueryResults} containing lineage metrics. */
+  private static MetricQueryResults getLineageQueryResults(MetricResults results, Type type) {
+    MetricsFilter filter =
+        MetricsFilter.builder()
+            .addNameFilter(MetricNameFilter.named(LINEAGE_NAMESPACE, type.toString()))
+            .build();
+    return results.queryMetrics(filter);
+  }
+
+  /**
+   * Wrap segment to valid segment name.
+   *
+   * <p>It escapes reserved characters
+   *
+   * <ul>
+   *   <li>Reserved characters are backtick, colon, whitespace (space, \t, \n) and dot.
+   *   <li>Only segments containing reserved characters must be escaped.
+   *   <li>Segments cannot be escaped partially (i.e. “bigquery:com`.`google.test”).
+   *   <li>Segments must be escaped using backticks (a.k.a. graves).
+   *   <li>Backticks must be escaped using backtick (i.e. bigquery:`test``test`) and the segment
+   *       itself must be escaped as well.
+   * </ul>
+   */
+  @Internal
+  public static String wrapSegment(String value) {
+    value = value.replace("`", "``"); // Escape backticks
+    // the escaped backticks will not throw this off since escaping will
+    // happen if it contains ` in first place.
+    if (RESERVED_CHARS.matcher(value).find()) {
+      return String.format("`%s`", value);
+    }
+    return value;
+  }
+}

@@ -1,0 +1,588 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+host: https://storage.googleapis.com
+path: public_looker_explores_us_a3853f40
+static_base: /images/performance/looks
+looks:
+  bigquery:
+    read:
+      folder: 30
+      test_name:
+        - id: nwQxvsnQFdBPTk27pZYxjcGNm2rRfNJk
+          title: Runtime and Estimated Cost by Test Name
+      date:
+        - id: 7QKbMmgT5NgPH6RsDfVQmKMdjJysS37x
+          title: AvgOutputThroughputBytesPerSec by Date
+        - id: hSqCyCkHkh4whNZSpdVFwB8ksPWrbScb
+          title: AvgOutputThroughputElementsPerSec by Date
+      version:
+        - id: SghzxqjMb5QQwgZn7yHw4MnpGXBgXQft
+          title: AvgOutputThroughputBytesPerSec by Version
+        - id: QT6X4GTCnxxykSZ7tpXyBfBFCKMgdzs7
+          title: AvgOutputThroughputElementsPerSec by Version
+    write:
+      folder: 31
+      test_name:
+        - id: sHyRfwCfGCPqSwsTWXSsxfbHKH5hXjzc
+          title: Write BigQuery RunTime and EstimatedCost
+      date:
+        - id: p2qnxS58WdWdZTzJhXfSbkhxGyDXMYfY
+          title: AvgInputThroughputBytesPerSec by Date
+        - id: Bmg6sv8XPtcn3cGtgPtKP26Zj4cyd2XK
+          title: AvgInputThroughputElementsPerSec by Date
+      version:
+        - id: Q6QvktyfSFrSPq4TSDgQQyV9jttjwQJp
+          title: AvgInputThroughputBytesPerSec by Version
+        - id: ktfyZ7Th8yRFFwWgb4WSxngBpmSfz8xh
+          title: AvgInputThroughputElementsPerSec by Version
+  bigtable:
+    read:
+      folder: 32
+      test_name:
+        - id: YQ2W3wdNnBXMgDgpzCRbmQWMHjyPvZny
+          title: Read BigTable RunTime and EstimatedCost
+      date:
+        - id: szvwNfPrwTtmRmMHWv3QFh6wTKxm26TF
+          title: AvgOutputThroughputBytesPerSec by Date
+        - id: ZRQw7np2mj35kQHcvgtNDwVGgP855QNF
+          title: AvgOutputThroughputElementsPerSec by Date
+      version:
+        - id: X7y2hQQkJnYY8ctnr2y7NnNx7xrMkjt2
+          title: AvgOutputThroughputBytesPerSec by Version
+        - id: B3HwmTtn9nBfzwRC7s3WfQSjf7ckrfXx
+          title: AvgOutputThroughputElementsPerSec by Version
+    write:
+      folder: 33
+      test_name:
+        - id: 2sC27RQwWy2MP9DXVHjbvTYSNFYpFvxj
+          title: Write BigTable RunTime and EstimatedCost
+      date:
+      - id: X22sDqD8krBQQ4mRXTFMmpKFvgkZ529g
+        title: AvgInputThroughputBytesPerSec by Date
+      - id: WqHVhrjQVrrjpczqgJB9s9k8fvt3Vc2d
+        title: AvgInputThroughputElementsPerSec by Date
+      version:
+      - id: j72shCBz6rJhQP8JwYB3JcVrhv9BWGpD
+        title: AvgInputThroughputBytesPerSec by Version
+      - id: 6DyhkfvcNfkJg53hwFnRzxqbJDdGb5t7
+        title: AvgInputThroughputElementsPerSec by Version
+  textio:
+    read:
+      folder: 34
+      test_name:
+        - id: SsfFgvwyMthnHjdRwBjWGNbvfNgym4wb
+          title: Read TextIO RunTime and EstimatedCost
+      date:
+        - id: Pr8MBG66JVgBmdQbDr6HXtRprjr3ybj6
+          title: AvgOutputThroughputBytesPerSec by Date
+        - id: CTZYK4KVYM65Zjn6jWgDYYNBWckDYKRQ
+          title: AvgOutputThroughputElementsPerSec by Date
+      version:
+        - id: Dcvfh3XFZySrsmPY4Rm8NYyMg5QQRBF6
+          title: AvgOutputThroughputBytesPerSec by Version
+        - id: dN8mTZsVZc7vGDYKJCT8S67BCXzVJT4s
+          title: AvgOutputThroughputElementsPerSec by Version
+    write:
+      folder: 35
+      test_name:
+        - id: Mm2j2QPc2x4hZqYNSpZC4bDpH2fgvqvp
+          title: Write TextIO RunTime and EstimatedCost
+      date:
+      - id: J9VXhp3ry5zbPFFGsYNfDRypGNVNMbPV
+        title: AvgInputThroughputBytesPerSec by Date
+      - id: KwSCnyz75wMpXhGpZQ8FRp6cwt8pjhfD
+        title: AvgInputThroughputElementsPerSec by Date
+      version:
+      - id: VFXbPV9JGJxmNYnGsypQzH97RPDFjpPN
+        title: AvgInputThroughputBytesPerSec by Version
+      - id: fVVHhXCrHNgBG52TJsTjR8VbmWCCQnVN
+        title: AvgInputThroughputElementsPerSec by Version
+  icebergio:
+    read:
+      folder: 113
+      test_name:
+        - id: x5R7w8VnzkccgzrBTWQ82J7JBNtkGxH2
+          title: Read IcebergIO RunTime and EstimatedCost
+      date:
+        - id: HQsKkmn7cS7m5bCYzPBYqnnFM6MXvJgV
+          title: AvgOutputThroughputBytesPerSec by Date
+        - id: MNYqD2ZCwV2XfYjwDg4NDVT7vr4Ytpz2
+          title: AvgOutputThroughputElementsPerSec by Date
+      version:
+        - id: Cf7wGQfrM4hn8Wdf64ZjwshrHHdZKmKs
+          title: AvgOutputThroughputBytesPerSec by Version
+        - id: MGSX85MhCnCFFWYzSCGS36JRWxcBccqd
+          title: AvgOutputThroughputElementsPerSec by Version
+    write:
+      folder: 114
+      test_name:
+        - id: yvvWB2JbbbFQ4R5MTwF2hbVW2X4bDxnY
+          title: Write IcebergIO RunTime and EstimatedCost
+      date:
+        - id: Gcw6jfhvvkkHKDwqqTkhZtYYNNH2Z8DZ
+          title: AvgInputThroughputBytesPerSec by Date
+        - id: RYtRGKsxBRkyRgWk6RGjshFnZPk76vhM
+          title: AvgInputThroughputElementsPerSec by Date
+      version:
+        - id: B5q25ktnXNhHxpYrGmqzgcGMgX26zvM3
+          title: AvgInputThroughputBytesPerSec by Version
+        - id: VfMWk6rk26JQNr8wRpsK5Gk6XQPfd7vW
+          title: AvgInputThroughputElementsPerSec by Version
+  pytorchbertbase:
+    write:
+      folder: 76
+      cost:
+        - id: Vybj7cBtbvVWJG63RRcYCTBC8TrD3Sdm
+          title: RunTime and EstimatedCost
+      date:
+        - id: DZfwm7T8kyVXzBkd7Hm65y8JNfNzZzYT
+          title: AvgThroughputBytesPerSec by Date
+        - id: ZDnG6kH55T2WPSD7yQh5cF6pkrQdRHKr
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: YCGWnm7S84qRcVm6kPKRwwgnKpg5xyJW
+          title: AvgThroughputBytesPerSec by Version
+        - id: 2dPXDTthFxDhvdypyHYNp7bSbMJggW6x
+          title: AvgThroughputElementsPerSec by Version
+  pytorchbertlarge:
+    write:
+      folder: 77
+      cost:
+        - id: gTN4qQbqFfJMWJKzwJHsXpjVV8McFbm8
+          title: RunTime and EstimatedCost
+      date:
+        - id: jGS2p6kTK9pZq94sYdqmNcz67PP6pKFd
+          title: AvgThroughputBytesPerSec by Date
+        - id: wfhCtgfnqM5YjRYbp4624fnyJcT2zXcT
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: Z3k29nwZrdCXJZdg5Yg7SSKDm2T4y8rZ
+          title: AvgThroughputBytesPerSec by Version
+        - id: D5g8qkqGKTpNqC8RV9cK2mPPD7rqJ8f4
+          title: AvgThroughputElementsPerSec by Version
+  pytorchresnet101:
+    write:
+      folder: 78
+      cost:
+        - id: DKbt3WmgTxnxXd5FKMtPvf5SgxYSByPT
+          title: RunTime and EstimatedCost
+      date:
+        - id: GDMn2mY45d4wpvw3tZpJhYnC6gpqysvn
+          title: AvgThroughputBytesPerSec by Date
+        - id: VnXf9SqntCd2SRw3Br2bgfkytVGdGxrV
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: cmWSXFn4Vp2pvpFJK3NNQg3mdTk7ywBC
+          title: AvgThroughputBytesPerSec by Version
+        - id: BpPdzhWWJttM8gcmQ4WSpFKX38BfHwbk
+          title: AvgThroughputElementsPerSec by Version
+  pytorchresnet152:
+    write:
+      folder: 79
+      cost:
+        - id: jkV2YJPv3MgqD22DRB65cbGNVjPDcJwT
+          title: RunTime and EstimatedCost
+      date:
+        - id: pvQwSM5JvxmJDcXpDJySctdYZkWDF69H
+          title: AvgThroughputBytesPerSec by Date
+        - id: JGctprgybxbfp2sBjspnBdRppmRXS5Sn
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: qc689x3JQxg5DWWVC4mBPqGCdx3hPSTG
+          title: AvgThroughputBytesPerSec by Version
+        - id: wS7Htr76CJ75gJ47tVP8ZT8rBw6BY3QW
+          title: AvgThroughputElementsPerSec by Version
+  pytorchresnet152tesla:
+    write:
+      folder: 80
+      cost:
+        - id: YD3mVwkS3976Cv7bCSSmDP5f4jXFsFRF
+          title: RunTime and EstimatedCost
+      date:
+        - id: 8r96B3vsfhTpwgz4FgH7xbH5KY8d5k4b
+          title: AvgThroughputBytesPerSec by Date
+        - id: whGvSJZzRbpvfYrqMhnsJRHWk3mKyF7r
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: hGVcdDzrSndZh68P9jrY5MMTCQ6wwrKb
+          title: AvgThroughputBytesPerSec by Version
+        - id: DVhGKTmJWknSvfQVPQ9FDrvPYgdJ2dFd
+          title: AvgThroughputElementsPerSec by Version
+  tensorflowmnist:
+    write:
+      folder: 75
+      cost:
+        - id: Vs9ZHMkCkrSgJF7FCPdQS5HwK8PQTyWb
+          title: RunTime and EstimatedCost
+      date:
+        - id: 7mYxWj4hDXQp2SZ28vMNTCZGhWcPQdwJ
+          title: AvgThroughputBytesPerSec by Date
+        - id: bWhWQ9t2jKGscc9ghgH77wRszTxwW8mM
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: y3jVqx2xKcZGpkMBTSCZCpGMPPFHrC8V
+          title: AvgThroughputBytesPerSec by Version
+        - id: YdD9SMWCDNJ7wCY4WZwyd2Jt9Ts38FY2
+          title: AvgThroughputElementsPerSec by Version
+  pytorchbertsentimentstreaming:
+    write:
+      folder: 82
+      cost:
+        - id: z4t9TV5tQ8FsbkGD2n5J3hJXb3Dqqmws
+          title: RunTime and EstimatedCost
+      date:
+        - id: fYKCv726FKRPmqvmdGb84dqmCr6F4b27
+          title: AvgThroughputBytesPerSec by Date
+        - id: KD756kCJwwhbmszMmrCHFRWcNPXc7DSd
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: YpwpPBYhPdsGqqM7YH4SCMhk7m5CX5Kw
+          title: AvgThroughputBytesPerSec by Version
+        - id: ZvpwR8FqmsXZR3Bywj6QG6wBSF2dPDyG
+          title: AvgThroughputElementsPerSec by Version
+  pytorchbertsentimentbatch:
+    write:
+      folder: 85
+      cost:
+        - id: Tkkbgk4xCpV3SQPZmYmK4Shn8VhRQDyy
+          title: RunTime and EstimatedCost
+      date:
+        - id: gbNRPrMXP3rq8YDyvvfkTVYZR84KWKFv
+          title: AvgThroughputBytesPerSec by Date
+        - id: Wkt629BgJdpxTF9ChmjJpwVSBc8BwxnD
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: jWYjJFq6B7dSP6TjbypcfH5VycGHH6sC
+          title: AvgThroughputBytesPerSec by Version
+        - id: 8QhvYBRjYK29sS4HpK7CRJ42JKNFgvcg
+          title: AvgThroughputElementsPerSec by Version
+  vllmgemmabatchtesla:
+    write:
+      folder: 86
+      cost:
+        - id: J5TtpRykjwPs4W6S88FnJ28Tr8sSHpqN
+          title: RunTime and EstimatedCost
+      date:
+        - id: tJWFWW3cnF2CWpmK2zZdXGvWmtNnJgrC
+          title: AvgThroughputBytesPerSec by Date
+        - id: Jf6qGqN25Zf787DpkNDX5CBpGRvCGMXp
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: Qwxm27qY4fqT4CxXsFfKm2g3734TFJNN
+          title: AvgThroughputBytesPerSec by Version
+        - id: dKyJy5ZKhkBdSTXRY3wZR6fXzptSs2qm
+          title: AvgThroughputElementsPerSec by Version
+  tablerowinference:
+    write:
+      folder: 96
+      cost:
+        - id: Yj3r3VpFDxQwNmPzSsq7wJKf628FxtTg
+          title: RunTime and EstimatedCost
+      date:
+        - id: 82WSkFRcNHm5gbzWdSJFQxDPyGMwFMRj
+          title: AvgThroughputBytesPerSec by Date
+        - id: cN8GSph5PfJgTFxhZHgW4KfkvzhnXcFG
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: cxkwmK48MWZWB5bd4DHmGMsMs4VTf4Jd
+          title: AvgThroughputBytesPerSec by Version
+        - id: kCbhxxJbh2fyyZZFVtPQdpV5jX36CySQ
+          title: AvgThroughputElementsPerSec by Version
+  tablerowinferencestreaming:
+    write:
+      folder: 106
+      cost:
+        - id: WcSwy6KG8JQdYBVspDjbXqQgynrNWdxR
+          title: RunTime and EstimatedCost
+      date:
+        - id: c7h74dqjc4J7r4cGWFZwmzZK4WDBpRgt
+          title: AvgThroughputBytesPerSec by Date
+        - id: 7bznmBXqc2fwsQrGMfVWXZgNsyyq7Tdx
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: Y4464V8V4ngydnypmrrTVDmrYQsfb8mz
+          title: AvgThroughputBytesPerSec by Version
+        - id: P7wKZy6tQFWbbDfm4HzfCJnsQrVgfGsJ
+          title: AvgThroughputElementsPerSec by Version
+  pytorchimagenetrightfitcpu:
+    write:
+      folder: 92
+      cost:
+        - id: zJhxrMmxJ3zVHH5WZnDQqcBHdFDrBhxK
+          title: RunTime and EstimatedCost
+      date:
+        - id: RybzxZdkXJg6PzQZkBcfxTJkByTf3ZV5
+          title: AvgThroughputBytesPerSec by Date
+        - id: xTVYPytQVH7zXYz7SvphnRV4nQcxCddp
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: dGN6Zr6rh7DfnRtTDCN6GHcNfhSkrbCq
+          title: AvgThroughputBytesPerSec by Version
+        - id: VJMWrZh3jXk2mqCZk4NQn3tBrHgGWqnC
+          title: AvgThroughputElementsPerSec by Version
+  pytorchimagenetrightfitoncecpu:
+    write:
+      folder: 97
+      cost:
+        - id: DhsvrRxpby2F25jbj8NPVR6FhzKgsHBP
+          title: RunTime and EstimatedCost
+      date:
+        - id: sntwpmZjMVT57kvG8KM8rzDjBKsrRTF7
+          title: AvgThroughputBytesPerSec by Date
+        - id: 5GJHCVH65y2zmnrZ3QqmYqk8vKfPD4D6
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: rz24FQ24rz3HtFmpzK2rKD4zFT5kpG46
+          title: AvgThroughputBytesPerSec by Version
+        - id: jZkcSdHbvmGXy8f37RShNvgGv6HVN7Dy
+          title: AvgThroughputElementsPerSec by Version
+  pytorchimagenetrightfitgpu:
+    write:
+      folder: 98
+      cost:
+        - id: sMgzq4N8kJfjSjhSzVDzmXSHbXKwCy4r
+          title: RunTime and EstimatedCost
+      date:
+        - id: t3D6hqq7BywmvjBmxtWCvRMsFFMgPBg7
+          title: AvgThroughputBytesPerSec by Date
+        - id: MRptKCFsnTKcxPgVKKVvs7c8XVTf6MSN
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: v6jHqBc8WvCPspgdxQdjSZ6bCgqqPvZ3
+          title: AvgThroughputBytesPerSec by Version
+        - id: DhGNQDmRDhYSCDgXDsx6BtCcDfwKCWhb
+          title: AvgThroughputElementsPerSec by Version
+  pytorchimagenetrightfitoncegpu:
+    write:
+      folder: 99
+      cost:
+        - id: YbwBRmMVBCxPzjm22vWvJ2fDG5mmM3BR
+          title: RunTime and EstimatedCost
+      date:
+        - id: WtCZn2CrRrDdygbxQhfVhNM8F7NRRpsW
+          title: AvgThroughputBytesPerSec by Date
+        - id: RBMNkqksbcN3WcwCxz4B5mxVq5Y8yk2x
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: 48tzWvydG73Y3QwPJwQzYCkzdDnpF2T7
+          title: AvgThroughputBytesPerSec by Version
+        - id: 3VDCrNY6q8FyS28YRrxjJtMBYkxKRdBw
+          title: AvgThroughputElementsPerSec by Version
+  pytorchimageobjectdetectionbatchgpu:
+    write:
+      folder: 93
+      cost:
+        - id: XGPVSYhVbZGJHQCtMPW4nRGynxXpdzdh
+          title: RunTime and EstimatedCost
+      date:
+        - id: ZW48KBPBxShGgWx53vjfvgqp6cVmHCNB
+          title: AvgThroughputBytesPerSec by Date
+        - id: BjMWg26F3gNHQyZSsg8HjhTg3mCh6jFJ
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: kbF7Gnqjsjnvh3MKvYszSgWFbgDYYTWR
+          title: AvgThroughputBytesPerSec by Version
+        - id: cTxrpY3KGrCb35dq7fnjvdsDnd7t85pJ
+          title: AvgThroughputElementsPerSec by Version
+  pytorchimageobjectdetectionbatchcpu:
+    write:
+      folder: 100
+      cost:
+        - id: QbMVTdnxzmZzfymSrKsGTvyqFTMpwqy7
+          title: RunTime and EstimatedCost
+      date:
+        - id: v6H8sqn7X66j5g6qpgC6B57z624cCfDM
+          title: AvgThroughputBytesPerSec by Date
+        - id: KBMSpWzB5RgdYsTdZxGCXDYbWpskVqGS
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: GWz5VDrMTxSCrFqQwk2MyPHMwBHC253c
+          title: AvgThroughputBytesPerSec by Version
+        - id: NBWHNG8GmGHp8Bmg25wqg3tP8jWdP5PW
+          title: AvgThroughputElementsPerSec by Version
+  pytorchimageobjectdetectionstreaminggpu:
+    write:
+      folder: 101
+      cost:
+        - id: SfgfDsbRVk67XMnKZShq3xVBFghN7GSv
+          title: RunTime and EstimatedCost
+      date:
+        - id: MtMJZTTrkgXZz24zbQbpzwYNjWwcfhqw
+          title: AvgThroughputBytesPerSec by Date
+        - id: kKncXDm5MKvfwVzFyXqQ4TpfR5VdT5z7
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: ZWQ7vnsXYb5PDr5yDFjM3QP8gkkmdgdQ
+          title: AvgThroughputBytesPerSec by Version
+        - id: cTmDCbdCQyrsK3fS333vmR3BwCwrGZgp
+          title: AvgThroughputElementsPerSec by Version
+  pytorchimageobjectdetectionstreamingcpu:
+    write:
+      folder: 102
+      cost:
+        - id: FHgY6JfxRc23jJ6THkb7sPVw2HSw4kgs
+          title: RunTime and EstimatedCost
+      date:
+        - id: G5DNH6vXpGVnYP8ZGMwppdGvgvndM8kn
+          title: AvgThroughputBytesPerSec by Date
+        - id: CGR43NrksWDscGNWCKsVGCwc3RxmvGhD
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: wGGVRGxBjXxQf3yvynSFtcDCVCqKzByy
+          title: AvgThroughputBytesPerSec by Version
+        - id: M5nWYF76fWPnbTH6QkzWqzRV8fSWxtWD
+          title: AvgThroughputElementsPerSec by Version
+  pytorchimagecaptioningbatchgpu:
+    write:
+      folder: 94
+      cost:
+        - id: nhYggnCYJzfgDyTXZRGJwpSyYKvBpfhV
+          title: RunTime and EstimatedCost
+      date:
+        - id: qzjkYQJCrxjc8GPcBF7dFJSFdTXQKxmR
+          title: AvgThroughputBytesPerSec by Date
+        - id: kgkdbBCbkhDHpb2rHNGQDxcwGqzykwqD
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: 4p7b4HWVMRC8HXDZYMXbVYf2VPzYQ2kz
+          title: AvgThroughputBytesPerSec by Version
+        - id: xQZRDYJRvmV7qMhb3j2XTrPmC8TP4DTr
+          title: AvgThroughputElementsPerSec by Version
+  pytorchimagecaptioningbatchcpu:
+    write:
+      folder: 103
+      cost:
+        - id: M4vTdbrK6BxJXdXcnR7WPwW7VF4Fmhbb
+          title: RunTime and EstimatedCost
+      date:
+        - id: T23Fty8X6dF6DFhxSy32ymSwqz64fPXT
+          title: AvgThroughputBytesPerSec by Date
+        - id: Wm2qdmKgHbzfJbW7vNVfrGtQWV4xGCx3
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: wnQqxHgwJstnV4fPCkNpvMxJpyPG4326
+          title: AvgThroughputBytesPerSec by Version
+        - id: kPMV7d8Htpp6CT8q5hC6NF5DbTRwBQcJ
+          title: AvgThroughputElementsPerSec by Version
+  pytorchimagecaptioningstreaminggpu:
+    write:
+      folder: 104
+      cost:
+        - id: rgrPw4ZdZjCD8cvKqdvdPGGtPJgWfNK5
+          title: RunTime and EstimatedCost
+      date:
+        - id: jwpm4S36mGXPrY2nfpWrCvDHN6Nsrnpq
+          title: AvgThroughputBytesPerSec by Date
+        - id: QmY5QVTpndNTBJdqWjMxxD4zQkZqn6Xs
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: htD3YwWcTPYcRk4wqtqHshnt7hrgyrfk
+          title: AvgThroughputBytesPerSec by Version
+        - id: rv3QbsbxBV68MWG8hdjhnH84zJsPgJQh
+          title: AvgThroughputElementsPerSec by Version
+  pytorchimagecaptioningstreamingcpu:
+    write:
+      folder: 105
+      cost:
+        - id: YkFKPzV2Rvgy5hmmx2KPyJCHhbxhSjzj
+          title: RunTime and EstimatedCost
+      date:
+        - id: 5WStCthVw8gtCdKrY5mhQf8T6N45GGqH
+          title: AvgThroughputBytesPerSec by Date
+        - id: ZnJj4QFrd3dwmsmv3xdNKytPfbW7j88C
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: VHqjNCVNScFqHF8d65khMDGxfSPrBrMh
+          title: AvgThroughputBytesPerSec by Version
+        - id: ykZJhrhHDzyPBSTxyNcdYG7yw5qs3dYj
+          title: AvgThroughputElementsPerSec by Version
+  mltransformonehot:
+    write:
+      folder: 108
+      cost:
+        - id: 37DYwfbr5y4gt7g7g7RzRSzGTjd4Jjbj
+          title: RunTime and EstimatedCost
+      date:
+        - id: trcXrBCyPjYj2jTGc3px3d72xMXPCmZb
+          title: AvgThroughputBytesPerSec by Date
+        - id: yczZ4G8rYcP3SHjtQXz7p4BdRhGcXydx
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: mHtwwXKndpJVPjnkcHqRZpfPzfzHtT38
+          title: AvgThroughputBytesPerSec by Version
+        - id: Cn5FsXkdy2ZXCxCJshSCxcjsTW3TXf3c
+          title: AvgThroughputElementsPerSec by Version
+  mltransformvocab:
+    write:
+      folder: 107
+      cost:
+        - id: CccNCHQ23Js2tmxTDYVnjxwfx2zSFSjY
+          title: RunTime and EstimatedCost
+      date:
+        - id: n7Gn7c7KSW52ZgXCQXndHgWtjVPK8W33
+          title: AvgThroughputBytesPerSec by Date
+        - id: 3tcg6cSh6tBg6FmpTxgzyMtvFqWKkQn3
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: tPYwJngPDBsKjK3DNgGHGsCyTpxdfmTB
+          title: AvgThroughputBytesPerSec by Version
+        - id: cC75NnCbQT3mQmKVHtDxzptXpwPb64qz
+          title: AvgThroughputElementsPerSec by Version
+  mltransform-text-embedding:
+    write:
+      folder: 109
+      cost:
+        - id: wm4mr82Q6MGcJZbvQF32MQB6vYMh3pBM
+          title: RunTime and EstimatedCost
+      date:
+        - id: dcCym4PGpqg3mTXsTXS5tfmTcJCVNTBD
+          title: AvgThroughputBytesPerSec by Date
+        - id: Q5sKJqB53Jkhy5TKCybfQgXjJnhp7pRQ
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: qdpHqnkzRPb2zqJr8sjCpW84KSQkhDHJ
+          title: AvgThroughputBytesPerSec by Version
+        - id: HcWgFVVct3xq2WjCMmY7Q8KcHGms7KDW
+          title: AvgThroughputElementsPerSec by Version
+  mltransform-image-embedding-gpu:
+    write:
+      folder: 110
+      cost:
+        - id: zQZzvdcy3srprGq5qxqmRRN4GRHpdRDX
+          title: RunTime and EstimatedCost
+      date:
+        - id: X2wdRXcgsFG7sxfSQykhypFDkYtRjN2J
+          title: AvgThroughputBytesPerSec by Date
+        - id: zppHCwdN5qrDpyn2WQpJd8YmfQCPw4dk
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: FZXH7JKyFNWmrkgcFQZYxH7wywZgQpYF
+          title: AvgThroughputBytesPerSec by Version
+        - id: FQ3QYHgZTxvh3zPp3BcsGnmJx7yxfVzc
+          title: AvgThroughputElementsPerSec by Version
+  mltransform-image-embedding-cpu:
+    write:
+      folder: 111
+      cost:
+        - id: dxnGs2xD2vNH4Y6HbFMDd5Hc2d5cqVWc
+          title: RunTime and EstimatedCost
+      date:
+        - id: tkwdB46WT8YDkR4Q37jJ2p7y5fGchmTC
+          title: AvgThroughputBytesPerSec by Date
+        - id: x3f5pRDvjKxVPy5Y6GjghhqSddYxprn3
+          title: AvgThroughputElementsPerSec by Date
+      version:
+        - id: ZPHYbRdBMBSvd7RGS8wF8C8d8hysQmbH
+          title: AvgThroughputBytesPerSec by Version
+        - id: zjMRJssC6tNrtKPBgs8yPW8jHkbk8wjk
+          title: AvgThroughputElementsPerSec by Version

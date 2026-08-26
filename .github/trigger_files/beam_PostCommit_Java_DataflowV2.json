@@ -1,0 +1,4 @@
+{
+  "modification": 9,
+  "https://github.com/apache/beam/pull/35159": "moving WindowedValue and making an interface"
+}

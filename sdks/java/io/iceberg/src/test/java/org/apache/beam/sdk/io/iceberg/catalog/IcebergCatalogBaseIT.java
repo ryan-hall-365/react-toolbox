@@ -1,0 +1,1628 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.beam.sdk.io.iceberg.catalog;
+
+import static org.apache.beam.sdk.io.iceberg.IcebergUtils.beamSchemaToIcebergSchema;
+import static org.apache.beam.sdk.io.iceberg.IcebergUtils.icebergSchemaToBeamSchema;
+import static org.apache.beam.sdk.managed.Managed.ICEBERG;
+import static org.apache.beam.sdk.managed.Managed.ICEBERG_CDC;
+import static org.apache.beam.sdk.util.Preconditions.checkStateNotNull;
+import static org.apache.beam.sdk.values.PCollection.IsBounded.BOUNDED;
+import static org.apache.beam.sdk.values.PCollection.IsBounded.UNBOUNDED;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.equalTo;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeTrue;
+
+import com.google.api.services.storage.model.StorageObject;
+import java.io.IOException;
+import java.io.Serializable;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BiFunction;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
+import java.util.stream.Stream;
+import org.apache.beam.runners.direct.DirectOptions;
+import org.apache.beam.runners.direct.DirectRunner;
+import org.apache.beam.sdk.extensions.gcp.options.GcpOptions;
+import org.apache.beam.sdk.extensions.gcp.options.GcsOptions;
+import org.apache.beam.sdk.extensions.gcp.util.GcsUtil;
+import org.apache.beam.sdk.extensions.gcp.util.gcsfs.GcsPath;
+import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO;
+import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO.TypedRead.Method;
+import org.apache.beam.sdk.io.iceberg.IcebergUtils;
+import org.apache.beam.sdk.io.iceberg.cdc.IcebergCdcMetadataColumns;
+import org.apache.beam.sdk.managed.Managed;
+import org.apache.beam.sdk.schemas.Schema;
+import org.apache.beam.sdk.schemas.logicaltypes.SqlTypes;
+import org.apache.beam.sdk.schemas.logicaltypes.Timestamp;
+import org.apache.beam.sdk.testing.PAssert;
+import org.apache.beam.sdk.testing.TestPipeline;
+import org.apache.beam.sdk.transforms.Create;
+import org.apache.beam.sdk.transforms.DoFn;
+import org.apache.beam.sdk.transforms.MapElements;
+import org.apache.beam.sdk.transforms.ParDo;
+import org.apache.beam.sdk.transforms.PeriodicImpulse;
+import org.apache.beam.sdk.transforms.SerializableFunction;
+import org.apache.beam.sdk.transforms.SimpleFunction;
+import org.apache.beam.sdk.transforms.windowing.FixedWindows;
+import org.apache.beam.sdk.transforms.windowing.Window;
+import org.apache.beam.sdk.util.RowFilter;
+import org.apache.beam.sdk.values.KV;
+import org.apache.beam.sdk.values.PCollection;
+import org.apache.beam.sdk.values.PCollection.IsBounded;
+import org.apache.beam.sdk.values.Row;
+import org.apache.beam.sdk.values.TypeDescriptors;
+import org.apache.beam.sdk.values.ValueKind;
+import org.apache.beam.vendor.guava.v32_1_2_jre.com.google.common.base.Preconditions;
+import org.apache.beam.vendor.guava.v32_1_2_jre.com.google.common.collect.ImmutableMap;
+import org.apache.beam.vendor.guava.v32_1_2_jre.com.google.common.collect.ImmutableSet;
+import org.apache.iceberg.AppendFiles;
+import org.apache.iceberg.ChangelogOperation;
+import org.apache.iceberg.CombinedScanTask;
+import org.apache.iceberg.DataFile;
+import org.apache.iceberg.DeleteFile;
+import org.apache.iceberg.FileFormat;
+import org.apache.iceberg.FileScanTask;
+import org.apache.iceberg.NullOrder;
+import org.apache.iceberg.PartitionSpec;
+import org.apache.iceberg.Snapshot;
+import org.apache.iceberg.SortDirection;
+import org.apache.iceberg.SortOrder;
+import org.apache.iceberg.Table;
+import org.apache.iceberg.TableProperties;
+import org.apache.iceberg.TableScan;
+import org.apache.iceberg.catalog.Catalog;
+import org.apache.iceberg.catalog.Namespace;
+import org.apache.iceberg.catalog.SupportsNamespaces;
+import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.data.GenericAppenderFactory;
+import org.apache.iceberg.data.GenericRecord;
+import org.apache.iceberg.data.IdentityPartitionConverters;
+import org.apache.iceberg.data.Record;
+import org.apache.iceberg.data.parquet.GenericParquetReaders;
+import org.apache.iceberg.data.parquet.GenericParquetWriter;
+import org.apache.iceberg.deletes.EqualityDeleteWriter;
+import org.apache.iceberg.deletes.PositionDelete;
+import org.apache.iceberg.deletes.PositionDeleteWriter;
+import org.apache.iceberg.encryption.EncryptedFiles;
+import org.apache.iceberg.encryption.InputFilesDecryptor;
+import org.apache.iceberg.io.CloseableIterable;
+import org.apache.iceberg.io.DataWriter;
+import org.apache.iceberg.io.FileIO;
+import org.apache.iceberg.io.InputFile;
+import org.apache.iceberg.io.OutputFile;
+import org.apache.iceberg.parquet.Parquet;
+import org.apache.iceberg.types.Type;
+import org.apache.iceberg.types.TypeUtil;
+import org.apache.iceberg.util.DateTimeUtil;
+import org.apache.iceberg.util.PartitionUtil;
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.joda.time.Duration;
+import org.joda.time.Instant;
+import org.joda.time.LocalDate;
+import org.joda.time.LocalTime;
+import org.joda.time.ReadableInstant;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TestName;
+import org.junit.rules.Timeout;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Base class for {@link Managed} {@link org.apache.beam.sdk.io.iceberg.IcebergIO} read and write
+ * tests.
+ *
+ * <p>To test a new catalog, create a subclass of this test class and implement the following two
+ * methods:
+ *
+ * <ul>
+ *   <li>{@link #createCatalog()}
+ *   <li>{@link #managedIcebergConfig(String)}
+ * </ul>
+ *
+ * <p>If the catalog needs further logic to set up and tear down, you can override and implement
+ * these methods:
+ *
+ * <ul>
+ *   <li>{@link #catalogSetup()}
+ *   <li>{@link #catalogCleanup(List)}
+ * </ul>
+ *
+ * <p>1,000 records are used for each test by default. You can change this by overriding {@link
+ * #numRecords()}.
+ */
+public abstract class IcebergCatalogBaseIT implements Serializable {
+  private static final long SETUP_TEARDOWN_SLEEP_MS = 5000;
+  private static final long AFTER_UPDATE_SLEEP_MS = 2000;
+
+  public abstract Catalog createCatalog();
+
+  public abstract Map<String, Object> managedIcebergConfig(String tableId);
+
+  public abstract String type();
+
+  /**
+   * Catalogs whose tables are also queryable with BigQuery return the BigQuery table reference for
+   * the given Iceberg table id: either the 4-part {@code project.catalog.namespace.table} form for
+   * Lakehouse runtime catalog (BigLake metastore REST) tables, or the 3-part {@code
+   * project.dataset.table} form for the BigQuery metastore federation, where namespaces surface as
+   * datasets. Returning null (the default) disables the cross-engine read checks in {@link
+   * #testReadWithBigQueryIO()}.
+   */
+  public @Nullable String bigQueryTableSpec(String tableId) {
+    return null;
+  }
+
+  public void catalogSetup() {
+    ((SupportsNamespaces) catalog).createNamespace(Namespace.of(namespace()));
+  }
+
+  public void catalogCleanup(List<Namespace> namespaces) throws IOException {
+    for (Namespace namespace : namespaces) {
+      for (TableIdentifier identifier : catalog.listTables(namespace)) {
+        catalog.dropTable(identifier);
+      }
+      if (catalog instanceof SupportsNamespaces) {
+        ((SupportsNamespaces) catalog).dropNamespace(namespace);
+      }
+    }
+  }
+
+  public Integer numRecords() {
+    return OPTIONS.getRunner().equals(DirectRunner.class) ? 10 : 1000;
+  }
+
+  public String namespace() {
+    return catalogName + "_" + testName.getMethodName();
+  }
+
+  public String tableId() {
+    return namespace() + ".test_table";
+  }
+
+  public static String warehouse(Class<? extends IcebergCatalogBaseIT> testClass) {
+    return String.format(
+        "%s/%s/%s",
+        TestPipeline.testingPipelineOptions().getTempLocation(), testClass.getSimpleName(), RANDOM);
+  }
+
+  public String catalogName = type() + "_test_catalog_" + System.currentTimeMillis();
+
+  @Before
+  public void setUp() throws Exception {
+    OPTIONS.as(DirectOptions.class).setTargetParallelism(1);
+    warehouse = warehouse(getClass());
+    namespacesToCleanup.add(namespace());
+    catalog = createCatalog();
+    catalogSetup();
+    Thread.sleep(SETUP_TEARDOWN_SLEEP_MS);
+  }
+
+  @After
+  public void cleanUp() throws Exception {
+    catalogCleanup(namespacesToCleanup.stream().map(Namespace::of).collect(Collectors.toList()));
+    LOG.info("Successfully cleaned up namespaces: {}", namespacesToCleanup);
+    Thread.sleep(SETUP_TEARDOWN_SLEEP_MS);
+
+    try {
+      GcsUtil gcsUtil = OPTIONS.as(GcsOptions.class).getGcsUtil();
+      GcsPath path = GcsPath.fromUri(warehouse);
+
+      @Nullable
+      List<StorageObject> objects =
+          gcsUtil
+              .listObjects(
+                  path.getBucket(),
+                  getClass().getSimpleName() + "/" + path.getFileName().toString(),
+                  null)
+              .getItems();
+
+      // sometimes a catalog's cleanup will take care of all the files.
+      // If any files are left though, manually delete them with GCS utils
+      if (objects != null) {
+        List<String> filesToDelete =
+            objects.stream()
+                .map(obj -> "gs://" + path.getBucket() + "/" + obj.getName())
+                .collect(Collectors.toList());
+        gcsUtil.remove(filesToDelete);
+      }
+      Thread.sleep(SETUP_TEARDOWN_SLEEP_MS);
+    } catch (Exception e) {
+      LOG.warn("Failed to clean up GCS files.", e);
+    }
+  }
+
+  protected static String warehouse;
+  protected List<String> namespacesToCleanup = new ArrayList<>();
+  public Catalog catalog;
+  protected static final GcpOptions OPTIONS =
+      TestPipeline.testingPipelineOptions().as(GcpOptions.class);
+  private static final String RANDOM = UUID.randomUUID().toString();
+  @Rule public TestPipeline pipeline = TestPipeline.create();
+  @Rule public TestName testName = new TestName();
+
+  @Rule
+  public transient Timeout globalTimeout =
+      Timeout.seconds(OPTIONS.getRunner().equals(DirectRunner.class) ? 300 : 20 * 60);
+
+  private static final int NUM_SHARDS = OPTIONS.getRunner().equals(DirectRunner.class) ? 1 : 10;
+  private static final Logger LOG = LoggerFactory.getLogger(IcebergCatalogBaseIT.class);
+  private static final Schema DOUBLY_NESTED_ROW_SCHEMA =
+      Schema.builder()
+          .addStringField("doubly_nested_str")
+          .addInt64Field("doubly_nested_float")
+          .build();
+
+  private static final Schema NESTED_ROW_SCHEMA =
+      Schema.builder()
+          .addStringField("nested_str")
+          .addRowField("nested_row", DOUBLY_NESTED_ROW_SCHEMA)
+          .addInt32Field("nested_int")
+          .addFloatField("nested_float")
+          .build();
+  protected static final Schema BEAM_SCHEMA =
+      Schema.builder()
+          .addStringField("str")
+          .addStringField("char")
+          .addInt64Field("modulo_5")
+          .addBooleanField("bool_field")
+          .addInt32Field("int_field")
+          .addRowField("row", NESTED_ROW_SCHEMA)
+          .addArrayField("arr_long", Schema.FieldType.INT64)
+          .addNullableRowField("nullable_row", NESTED_ROW_SCHEMA)
+          .addNullableInt64Field("nullable_long")
+          .addLogicalTypeField("datetime_tz", Timestamp.MICROS)
+          .addLogicalTypeField("datetime", SqlTypes.DATETIME)
+          .addLogicalTypeField("date", SqlTypes.DATE)
+          .addLogicalTypeField("time", SqlTypes.TIME)
+          .build();
+  private static final Schema CDC_BEAM_SCHEMA =
+      Schema.builder().addInt64Field("id").addStringField("data").build();
+
+  private static final SimpleFunction<Long, Row> ROW_FUNC =
+      new SimpleFunction<Long, Row>() {
+        final long offset2025Millis =
+            LocalDate.parse("2025-01-01").toDateTime(LocalTime.MIDNIGHT).getMillis();
+
+        @Override
+        public Row apply(Long num) {
+          String strNum = Long.toString(num);
+          Row nestedRow =
+              Row.withSchema(NESTED_ROW_SCHEMA)
+                  .addValue("nested_str_value_" + strNum)
+                  .addValue(
+                      Row.withSchema(DOUBLY_NESTED_ROW_SCHEMA)
+                          .addValue("doubly_nested_str_value_" + strNum)
+                          .addValue(num)
+                          .build())
+                  .addValue(Integer.valueOf(strNum))
+                  .addValue(Float.valueOf(strNum + "." + strNum))
+                  .build();
+
+          long timestampMillis = offset2025Millis + TimeUnit.HOURS.toMillis(num);
+          return Row.withSchema(BEAM_SCHEMA)
+              .addValue("value_" + strNum)
+              .addValue(String.valueOf((char) (97 + num % 5)))
+              .addValue(num % 5)
+              .addValue(num % 2 == 0)
+              .addValue(Integer.valueOf(strNum))
+              .addValue(nestedRow)
+              .addValue(LongStream.range(0, num % 10).boxed().collect(Collectors.toList()))
+              .addValue(num % 2 == 0 ? null : nestedRow)
+              .addValue(num)
+              .addValue(
+                  DateTimeUtil.timestamptzFromMicros(timestampMillis * 1000 + 123456789)
+                      .toInstant())
+              .addValue(DateTimeUtil.timestampFromMicros(timestampMillis * 1000 + 123456789))
+              .addValue(DateTimeUtil.dateFromDays(Integer.parseInt(strNum)))
+              .addValue(DateTimeUtil.timeFromMicros(num))
+              .build();
+        }
+      };
+
+  protected static final org.apache.iceberg.Schema ICEBERG_SCHEMA =
+      new org.apache.iceberg.Schema(
+          beamSchemaToIcebergSchema(BEAM_SCHEMA).columns(), Collections.singleton(1));
+  private static final org.apache.iceberg.Schema CDC_ICEBERG_SCHEMA =
+      new org.apache.iceberg.Schema(
+          beamSchemaToIcebergSchema(CDC_BEAM_SCHEMA).columns(), Collections.singleton(1));
+  protected static final SimpleFunction<Row, Record> RECORD_FUNC =
+      new SimpleFunction<Row, Record>() {
+        @Override
+        public Record apply(Row input) {
+          return IcebergUtils.beamRowToIcebergRecord(ICEBERG_SCHEMA, input);
+        }
+      };
+  protected final List<Row> inputRows =
+      LongStream.range(0, numRecords()).boxed().map(ROW_FUNC::apply).collect(Collectors.toList());
+
+  /** Populates the Iceberg table and Returns a {@link List<Row>} of expected elements. */
+  public List<Row> populateTable(Table table) throws IOException {
+    return populateTable(table, null);
+  }
+
+  /** Populates the Iceberg table with rows, but overrides one field. */
+  private List<Row> populateTable(Table table, @Nullable String charOverride) throws IOException {
+    double recordsPerShardFraction = numRecords().doubleValue() / NUM_SHARDS;
+    long maxRecordsPerShard = Math.round(Math.ceil(recordsPerShardFraction));
+
+    table.updateProperties().set("write.metadata.metrics.default", "full").commit();
+    AppendFiles appendFiles = table.newAppend();
+    List<Row> expectedRows = new ArrayList<>(numRecords());
+    int totalRecords = 0;
+    for (int shardNum = 0; shardNum < NUM_SHARDS; ++shardNum) {
+      String filepath = table.location() + "/" + UUID.randomUUID();
+      OutputFile file;
+      try (FileIO io = table.io()) {
+        file = io.newOutputFile(filepath);
+      }
+      DataWriter<Record> writer =
+          Parquet.writeData(file)
+              .schema(table.schema())
+              .createWriterFunc(GenericParquetWriter::create)
+              .overwrite()
+              .withSpec(table.spec())
+              .build();
+
+      for (int recordNum = 0;
+          recordNum < maxRecordsPerShard && totalRecords < numRecords();
+          ++recordNum, ++totalRecords) {
+
+        Row expectedBeamRow = ROW_FUNC.apply((long) recordNum);
+        if (charOverride != null) {
+          expectedBeamRow =
+              Row.fromRow(expectedBeamRow).withFieldValue("char", charOverride).build();
+        }
+        Record icebergRecord = RECORD_FUNC.apply(expectedBeamRow);
+
+        writer.write(icebergRecord);
+        expectedRows.add(expectedBeamRow);
+      }
+      writer.close();
+      appendFiles.appendFile(writer.toDataFile());
+    }
+    appendFiles.commit();
+
+    return expectedRows;
+  }
+
+  private static Map<Integer, ?> constantsMap(
+      FileScanTask task,
+      BiFunction<Type, Object, Object> converter,
+      org.apache.iceberg.Schema schema) {
+    PartitionSpec spec = task.spec();
+    Set<Integer> idColumns = spec.identitySourceIds();
+    org.apache.iceberg.Schema partitionSchema = TypeUtil.select(schema, idColumns);
+    boolean projectsIdentityPartitionColumns = !partitionSchema.columns().isEmpty();
+
+    if (projectsIdentityPartitionColumns) {
+      return PartitionUtil.constantsMap(task, converter);
+    } else {
+      return Collections.emptyMap();
+    }
+  }
+
+  private List<Record> readRecords(Table table) throws IOException {
+    org.apache.iceberg.Schema tableSchema = table.schema();
+    TableScan tableScan = table.newScan().project(tableSchema);
+    List<Record> writtenRecords = new ArrayList<>();
+    CloseableIterable<CombinedScanTask> tasks = tableScan.planTasks();
+    for (CombinedScanTask task : tasks) {
+      InputFilesDecryptor decryptor;
+      try (FileIO io = table.io()) {
+        decryptor = new InputFilesDecryptor(task, io, table.encryption());
+      }
+      for (FileScanTask fileTask : task.files()) {
+        Map<Integer, ?> idToConstants =
+            constantsMap(fileTask, IdentityPartitionConverters::convertConstant, tableSchema);
+        InputFile inputFile = decryptor.getInputFile(fileTask);
+        CloseableIterable<Record> iterable =
+            Parquet.read(inputFile)
+                .split(fileTask.start(), fileTask.length())
+                .project(tableSchema)
+                .createReaderFunc(
+                    fileSchema ->
+                        GenericParquetReaders.buildReader(tableSchema, fileSchema, idToConstants))
+                .filter(fileTask.residual())
+                .build();
+
+        for (Record rec : iterable) {
+          writtenRecords.add(rec);
+        }
+        iterable.close();
+      }
+    }
+    tasks.close();
+    return writtenRecords;
+  }
+
+  @Test
+  public void testRead() throws Exception {
+    Table table = catalog.createTable(TableIdentifier.parse(tableId()), ICEBERG_SCHEMA);
+
+    List<Row> expectedRows = populateTable(table);
+
+    Map<String, Object> config = managedIcebergConfig(tableId());
+
+    PCollection<Row> rows =
+        pipeline.apply(Managed.read(ICEBERG).withConfig(config)).getSinglePCollection();
+
+    PAssert.that(rows).containsInAnyOrder(expectedRows);
+    pipeline.run().waitUntilFinish();
+  }
+
+  @Test
+  public void testReadWithColumnPruning_keep() throws Exception {
+    Table table = catalog.createTable(TableIdentifier.parse(tableId()), ICEBERG_SCHEMA);
+
+    List<Row> expectedRows = populateTable(table);
+
+    List<String> fieldsToKeep = Arrays.asList("row", "modulo_5", "nullable_long");
+    RowFilter rowFilter = new RowFilter(BEAM_SCHEMA).keep(fieldsToKeep);
+
+    Map<String, Object> config = new HashMap<>(managedIcebergConfig(tableId()));
+    config.put("keep", fieldsToKeep);
+
+    PCollection<Row> rows =
+        pipeline.apply(Managed.read(ICEBERG).withConfig(config)).getSinglePCollection();
+    PAssert.that(rows).containsInAnyOrder(rowFilter.filter(expectedRows));
+    pipeline.run().waitUntilFinish();
+  }
+
+  @Test
+  public void testReadWithFilterAndColumnPruning_keep() throws Exception {
+    Table table = catalog.createTable(TableIdentifier.parse(tableId()), ICEBERG_SCHEMA);
+
+    List<String> keepFields = Arrays.asList("datetime_tz", "modulo_5", "str");
+    RowFilter rowFilter = new RowFilter(BEAM_SCHEMA).keep(keepFields);
+
+    List<Row> expectedRows =
+        populateTable(table).stream()
+            .filter(
+                row ->
+                    row.getLogicalTypeValue("datetime", LocalDateTime.class)
+                            .isAfter(LocalDateTime.parse("2025-01-01T09:00:00"))
+                        && (row.getInt32("int_field") < 500 || row.getInt32("modulo_5") == 3))
+            .map(rowFilter::filter)
+            .collect(Collectors.toList());
+
+    Map<String, Object> config = new HashMap<>(managedIcebergConfig(tableId()));
+    config.put(
+        "filter",
+        "\"datetime\" > '2025-01-01 09:00' AND (\"int_field\" < 500 OR \"modulo_5\" = 3)");
+    config.put("keep", keepFields);
+
+    PCollection<Row> rows =
+        pipeline.apply(Managed.read(ICEBERG).withConfig(config)).getSinglePCollection();
+    assertEquals(rowFilter.outputSchema(), rows.getSchema());
+
+    PAssert.that(rows).containsInAnyOrder(expectedRows);
+    pipeline.run().waitUntilFinish();
+  }
+
+  @Test
+  public void testReadWithNestedFieldFilter() throws Exception {
+    Table table = catalog.createTable(TableIdentifier.parse(tableId()), ICEBERG_SCHEMA);
+
+    List<Row> expectedRows =
+        populateTable(table).stream()
+            .filter(row -> row.getRow("row").getInt32("nested_int") < 350)
+            .collect(Collectors.toList());
+
+    Map<String, Object> config = new HashMap<>(managedIcebergConfig(tableId()));
+    config.put("filter", "\"row\".\"nested_int\" < 350");
+
+    PCollection<Row> rows =
+        pipeline.apply(Managed.read(ICEBERG).withConfig(config)).getSinglePCollection();
+
+    PAssert.that(rows).containsInAnyOrder(expectedRows);
+    pipeline.run().waitUntilFinish();
+  }
+
+  @Test
+  public void testStreamingReadWithFilter() throws Exception {
+    Table table = catalog.createTable(TableIdentifier.parse(tableId()), ICEBERG_SCHEMA);
+
+    List<Row> expectedRows =
+        populateTable(table).stream()
+            .filter(
+                row ->
+                    row.getBoolean("bool_field")
+                        && (row.getInt32("int_field") < 350 || row.getInt32("modulo_5") == 2))
+            .collect(Collectors.toList());
+
+    Map<String, Object> config = new HashMap<>(managedIcebergConfig(tableId()));
+    config.put("streaming", true);
+    config.put("to_snapshot", table.currentSnapshot().snapshotId());
+    config.put("filter", "\"bool_field\" = TRUE AND (\"int_field\" < 350 OR \"modulo_5\" = 2)");
+
+    PCollection<Row> rows =
+        pipeline.apply(Managed.read(ICEBERG_CDC).withConfig(config)).getSinglePCollection();
+
+    assertThat(rows.isBounded(), equalTo(UNBOUNDED));
+    PAssert.that(rows).containsInAnyOrder(expectedRows);
+    pipeline.run().waitUntilFinish();
+  }
+
+  @Test
+  public void testStreamingReadWithColumnPruning_drop() throws Exception {
+    Table table = catalog.createTable(TableIdentifier.parse(tableId()), ICEBERG_SCHEMA);
+
+    List<Row> expectedRows = populateTable(table);
+
+    List<String> fieldsToDrop = Arrays.asList("row", "modulo_5", "nullable_long");
+    RowFilter rowFilter = new RowFilter(BEAM_SCHEMA).drop(fieldsToDrop);
+
+    Map<String, Object> config = new HashMap<>(managedIcebergConfig(tableId()));
+    config.put("streaming", true);
+    config.put("to_snapshot", table.currentSnapshot().snapshotId());
+    config.put("drop", fieldsToDrop);
+
+    PCollection<Row> rows =
+        pipeline.apply(Managed.read(ICEBERG_CDC).withConfig(config)).getSinglePCollection();
+
+    assertThat(rows.isBounded(), equalTo(UNBOUNDED));
+    PAssert.that(rows).containsInAnyOrder(rowFilter.filter(expectedRows));
+    pipeline.run().waitUntilFinish();
+  }
+
+  @Test
+  public void testStreamingCdcReadMixedDeleteAndOverwriteSnapshots() throws Exception {
+    Table table = createCdcTable();
+    DataFile firstFile =
+        commitCdcAppend(
+            table,
+            "cdc-first-data.parquet",
+            Arrays.asList(
+                cdcRecord(table.schema(), 1L, "first-file-update-before"),
+                cdcRecord(table.schema(), 2L, "first-file-delete")));
+    Snapshot firstSnapshot = checkStateNotNull(table.currentSnapshot());
+
+    DataFile secondFile =
+        commitCdcAppend(
+            table,
+            "cdc-second-data.parquet",
+            Arrays.asList(
+                cdcRecord(table.schema(), 3L, "second-file-unchanged"),
+                cdcRecord(table.schema(), 4L, "second-file-update-before")));
+    Snapshot secondSnapshot = checkStateNotNull(table.currentSnapshot());
+
+    DeleteFile equalityDelete = writeCdcEqualityDelete(table, "cdc-equality-delete.parquet", 2L);
+    DeleteFile positionDelete =
+        writeCdcPositionDelete(table, "cdc-position-delete.parquet", firstFile, 0L);
+    DataFile thirdFile =
+        writeCdcDataFile(
+            table,
+            "cdc-third-data.parquet",
+            Collections.singletonList(cdcRecord(table.schema(), 1L, "third-file-update-after")));
+    table
+        .newRowDelta()
+        .addDeletes(equalityDelete)
+        .addDeletes(positionDelete)
+        .addRows(thirdFile)
+        .commit();
+    table.refresh();
+    Snapshot thirdSnapshot = checkStateNotNull(table.currentSnapshot());
+
+    DataFile fourthFile =
+        writeCdcDataFile(
+            table,
+            "cdc-fourth-data.parquet",
+            Arrays.asList(
+                cdcRecord(table.schema(), 3L, "second-file-unchanged"),
+                cdcRecord(table.schema(), 4L, "fourth-file-update-after")));
+    table.newOverwrite().deleteFile(secondFile).addFile(fourthFile).commit();
+    table.refresh();
+    Snapshot fourthSnapshot = checkStateNotNull(table.currentSnapshot());
+
+    Map<String, Object> config = new HashMap<>(managedIcebergConfig(tableId()));
+    config.put("from_snapshot", firstSnapshot.snapshotId());
+    config.put("to_snapshot", fourthSnapshot.snapshotId());
+    config.put("streaming", true);
+
+    PCollection<Row> rows =
+        pipeline.apply(Managed.read(ICEBERG_CDC).withConfig(config)).getSinglePCollection();
+
+    PCollection<String> changes = rows.apply("Format CDC Changes", ParDo.of(new FormatCdcChange()));
+
+    assertThat(rows.isBounded(), equalTo(UNBOUNDED));
+    assertEquals(CDC_BEAM_SCHEMA, rows.getSchema());
+    PAssert.that(changes)
+        .containsInAnyOrder(
+            cdcChange(ValueKind.INSERT, firstSnapshot, 1L, "first-file-update-before"),
+            cdcChange(ValueKind.INSERT, firstSnapshot, 2L, "first-file-delete"),
+            cdcChange(ValueKind.INSERT, secondSnapshot, 3L, "second-file-unchanged"),
+            cdcChange(ValueKind.INSERT, secondSnapshot, 4L, "second-file-update-before"),
+            cdcChange(ValueKind.UPDATE_BEFORE, thirdSnapshot, 1L, "first-file-update-before"),
+            cdcChange(ValueKind.UPDATE_AFTER, thirdSnapshot, 1L, "third-file-update-after"),
+            cdcChange(ValueKind.DELETE, thirdSnapshot, 2L, "first-file-delete"),
+            cdcChange(ValueKind.UPDATE_BEFORE, fourthSnapshot, 4L, "second-file-update-before"),
+            cdcChange(ValueKind.UPDATE_AFTER, fourthSnapshot, 4L, "fourth-file-update-after"));
+    pipeline.run().waitUntilFinish();
+  }
+
+  @Test
+  public void testCdcReadWithMetadataColumns() throws Exception {
+    Table table =
+        catalog.createTable(
+            TableIdentifier.parse(tableId()),
+            CDC_ICEBERG_SCHEMA,
+            PartitionSpec.unpartitioned(),
+            ImmutableMap.of(TableProperties.FORMAT_VERSION, "3"));
+    commitCdcAppend(
+        table,
+        "metadata-columns.parquet",
+        Arrays.asList(cdcRecord(table.schema(), 1L, "one"), cdcRecord(table.schema(), 2L, "two")));
+    Snapshot snapshot = checkStateNotNull(table.currentSnapshot());
+    long firstRowId = checkStateNotNull(snapshot.firstRowId());
+
+    Map<String, Object> config = new HashMap<>(managedIcebergConfig(tableId()));
+    config.put("to_snapshot", snapshot.snapshotId());
+    config.put(
+        "include_metadata_columns",
+        Arrays.asList(
+            IcebergCdcMetadataColumns.CHANGE_TYPE,
+            IcebergCdcMetadataColumns.COMMIT_SNAPSHOT_ID,
+            IcebergCdcMetadataColumns.COMMIT_SNAPSHOT_SEQUENCE_NUMBER,
+            IcebergCdcMetadataColumns.ROW_ID,
+            IcebergCdcMetadataColumns.LAST_UPDATED_SEQUENCE_NUMBER));
+
+    Schema outputSchema =
+        Schema.builder()
+            .addInt64Field("id")
+            .addStringField("data")
+            .addStringField(IcebergCdcMetadataColumns.CHANGE_TYPE)
+            .addInt64Field(IcebergCdcMetadataColumns.COMMIT_SNAPSHOT_ID)
+            .addInt64Field(IcebergCdcMetadataColumns.COMMIT_SNAPSHOT_SEQUENCE_NUMBER)
+            .addNullableField(IcebergCdcMetadataColumns.ROW_ID, Schema.FieldType.INT64)
+            .addNullableField(
+                IcebergCdcMetadataColumns.LAST_UPDATED_SEQUENCE_NUMBER, Schema.FieldType.INT64)
+            .build();
+
+    PCollection<Row> rows =
+        pipeline.apply(Managed.read(ICEBERG_CDC).withConfig(config)).getSinglePCollection();
+
+    assertEquals(BOUNDED, rows.isBounded());
+    assertEquals(outputSchema, rows.getSchema());
+    PAssert.that(rows)
+        .containsInAnyOrder(
+            cdcMetadataRow(1L, "one", snapshot, firstRowId, outputSchema),
+            cdcMetadataRow(2L, "two", snapshot, firstRowId + 1, outputSchema));
+    pipeline.run().waitUntilFinish();
+  }
+
+  @Test
+  public void testBatchReadBetweenSnapshots() throws Exception {
+    runReadBetween(true, false);
+  }
+
+  @Test
+  public void testStreamingReadBetweenTimestamps() throws Exception {
+    runReadBetween(false, true);
+  }
+
+  @Test
+  public void testWriteRead() throws IOException {
+    Table table = catalog.createTable(TableIdentifier.parse(tableId()), ICEBERG_SCHEMA);
+    List<Row> expectedRows = populateTable(table);
+    Map<String, Object> readConfig = managedIcebergConfig(tableId());
+    String writeTableId = tableId() + "_2";
+    Map<String, Object> writeConfig = managedIcebergConfig(writeTableId);
+
+    pipeline
+        .apply("read", Managed.read(ICEBERG).withConfig(readConfig))
+        .getSinglePCollection()
+        .apply("write", Managed.write(ICEBERG).withConfig(writeConfig));
+    pipeline.run().waitUntilFinish();
+
+    List<Record> returnedRecords =
+        readRecords(catalog.loadTable(TableIdentifier.parse(writeTableId)));
+    assertThat(
+        returnedRecords,
+        containsInAnyOrder(expectedRows.stream().map(RECORD_FUNC::apply).toArray()));
+  }
+
+  /**
+   * Cross-engine consistency: rows written through the Iceberg catalog must be readable with
+   * BigQueryIO's Storage Read API using the catalog's BigQuery table reference (see {@link
+   * #bigQueryTableSpec(String)}). Exercises the full read, server-side projection + filtering
+   * push-down, and a query read with the reference embedded in SQL.
+   *
+   * <p>Rows are compared on a projection of fields whose types survive the Iceberg-to-BigQuery
+   * mapping losslessly; BigQuery widens e.g. {@code int32} to {@code INT64}, so whole-row equality
+   * against the Iceberg schema does not hold by design.
+   */
+  @Test
+  public void testReadWithBigQueryIO() throws Exception {
+    String tableSpec = bigQueryTableSpec(tableId());
+    assumeTrue("Catalog does not surface its tables in BigQuery", tableSpec != null);
+    Table table = catalog.createTable(TableIdentifier.parse(tableId()), ICEBERG_SCHEMA);
+    List<Row> expectedRows = populateTable(table);
+    int intCutoff = numRecords() / 2;
+
+    List<String> expectedFull =
+        expectedRows.stream()
+            .map(
+                r ->
+                    canonical(
+                        r.getString("str"),
+                        r.getInt64("modulo_5"),
+                        r.getBoolean("bool_field"),
+                        r.getInt32("int_field")))
+            .collect(Collectors.toList());
+    List<String> expectedFiltered =
+        expectedRows.stream()
+            .filter(r -> checkStateNotNull(r.getInt32("int_field")) < intCutoff)
+            .map(r -> canonical(r.getString("str"), r.getInt32("int_field")))
+            .collect(Collectors.toList());
+
+    PCollection<String> fullRead =
+        pipeline
+            .apply(
+                "BQ direct read",
+                BigQueryIO.readTableRows().from(tableSpec).withMethod(Method.DIRECT_READ))
+            .apply(
+                "canonicalize full",
+                MapElements.into(TypeDescriptors.strings())
+                    .via(
+                        tr ->
+                            canonical(
+                                tr.get("str"),
+                                tr.get("modulo_5"),
+                                tr.get("bool_field"),
+                                tr.get("int_field"))));
+    PAssert.that(fullRead).containsInAnyOrder(expectedFull);
+
+    PCollection<String> pushdownRead =
+        pipeline
+            .apply(
+                "BQ pushdown read",
+                BigQueryIO.readTableRows()
+                    .from(tableSpec)
+                    .withMethod(Method.DIRECT_READ)
+                    .withSelectedFields(Arrays.asList("str", "int_field"))
+                    .withRowRestriction("int_field < " + intCutoff))
+            .apply(
+                "canonicalize pushdown",
+                MapElements.into(TypeDescriptors.strings())
+                    .via(tr -> canonical(tr.get("str"), tr.get("int_field"))));
+    PAssert.that(pushdownRead).containsInAnyOrder(expectedFiltered);
+
+    PCollection<String> queryRead =
+        pipeline
+            .apply(
+                "BQ query read",
+                BigQueryIO.readTableRows()
+                    .fromQuery(
+                        String.format(
+                            "SELECT str, int_field FROM `%s` WHERE int_field < %d",
+                            tableSpec, intCutoff))
+                    .usingStandardSql()
+                    .withMethod(Method.DIRECT_READ))
+            .apply(
+                "canonicalize query",
+                MapElements.into(TypeDescriptors.strings())
+                    .via(tr -> canonical(tr.get("str"), tr.get("int_field"))));
+    PAssert.that(queryRead).containsInAnyOrder(expectedFiltered);
+
+    pipeline.run().waitUntilFinish();
+  }
+
+  /**
+   * String canonicalization for cross-engine row comparison: {@code String.valueOf} normalizes
+   * representation differences (e.g. {@code Long} vs {@code Integer} vs numeric strings in {@code
+   * TableRow}).
+   */
+  private static String canonical(Object... values) {
+    StringBuilder sb = new StringBuilder();
+    for (Object value : values) {
+      sb.append(String.valueOf(normalize(value))).append('|');
+    }
+    return sb.toString();
+  }
+
+  /**
+   * Normalizes representation differences that are inherent to the Iceberg-to-BigQuery type mapping
+   * so that values compare equal across engines: BigQuery widens {@code float32} to {@code
+   * FLOAT64}, and the schema'd Beam Row conversion used by the Managed BigQuery read maps TIMESTAMP
+   * to Beam's DATETIME field type, a millisecond Joda instant, while the Iceberg-side rows carry
+   * microsecond {@code java.time.Instant}s. (Plain {@code readTableRows()} is not affected: its
+   * {@code TableRow} values are strings with full microsecond precision.)
+   */
+  private static Object normalize(Object value) {
+    if (value instanceof Float) {
+      return ((Float) value).doubleValue();
+    }
+    if (value instanceof java.time.Instant) {
+      return ((java.time.Instant) value).toEpochMilli();
+    }
+    if (value instanceof ReadableInstant) {
+      return ((ReadableInstant) value).getMillis();
+    }
+    return value;
+  }
+
+  /**
+   * Full-schema canonicalization for the type-fidelity check. Works on both the Iceberg-side
+   * expected rows and the BigQuery-lens rows returned by the Managed BigQuery read; {@link
+   * #normalize(Object)} absorbs the documented type widenings.
+   */
+  private static String fidelityCanonical(Row row) {
+    Row nested = checkStateNotNull(row.getRow("row"));
+    @Nullable Row nullableNested = row.getRow("nullable_row");
+    return canonical(
+        row.getValue("str"),
+        row.getValue("char"),
+        row.getValue("modulo_5"),
+        row.getValue("bool_field"),
+        row.getValue("int_field"),
+        nestedCanonical(nested),
+        (Object) row.getValue("arr_long"),
+        nullableNested == null ? "null" : nestedCanonical(nullableNested),
+        row.getValue("nullable_long"),
+        row.getValue("datetime_tz"),
+        row.getValue("datetime"),
+        row.getValue("date"),
+        row.getValue("time"));
+  }
+
+  private static String nestedCanonical(Row nested) {
+    Row doubly = checkStateNotNull(nested.getRow("nested_row"));
+    return canonical(
+        nested.getValue("nested_str"),
+        doubly.getValue("doubly_nested_str"),
+        doubly.getValue("doubly_nested_float"),
+        nested.getValue("nested_int"),
+        nested.getValue("nested_float"));
+  }
+
+  /**
+   * Type fidelity across the Iceberg-to-BigQuery read: every field of {@link #BEAM_SCHEMA}
+   * (including timestamps, datetime/date/time, arrays, and nullable nested rows) must survive the
+   * round trip with its value intact, modulo the documented widenings handled by {@link
+   * #normalize(Object)}.
+   */
+  @Test
+  public void testReadWithBigQueryIOTypeFidelity() throws Exception {
+    String tableSpec = bigQueryTableSpec(tableId());
+    assumeTrue("Catalog does not surface its tables in BigQuery", tableSpec != null);
+    Table table = catalog.createTable(TableIdentifier.parse(tableId()), ICEBERG_SCHEMA);
+    List<Row> expectedRows = populateTable(table);
+    List<String> expected =
+        expectedRows.stream()
+            .map(IcebergCatalogBaseIT::fidelityCanonical)
+            .collect(Collectors.toList());
+
+    PCollection<String> actual =
+        pipeline
+            .apply(
+                "BQ managed read",
+                Managed.read(Managed.BIGQUERY).withConfig(ImmutableMap.of("table", tableSpec)))
+            .getSinglePCollection()
+            .apply(
+                "fidelity canonicalize",
+                MapElements.into(TypeDescriptors.strings())
+                    .via(IcebergCatalogBaseIT::fidelityCanonical));
+    PAssert.that(actual).containsInAnyOrder(expected);
+    pipeline.run().waitUntilFinish();
+  }
+
+  /**
+   * Merge-on-read: BigQuery reads must apply Iceberg v2 row-level delete files. Writes an
+   * equality-delete file with the Iceberg API (as an external engine would), commits it as a row
+   * delta, and asserts the deleted rows are absent from the BigQueryIO read.
+   */
+  @Test
+  public void testReadWithBigQueryIOAfterRowLevelDeletes() throws Exception {
+    String tableSpec = bigQueryTableSpec(tableId());
+    assumeTrue("Catalog does not surface its tables in BigQuery", tableSpec != null);
+    Table table =
+        catalog.createTable(
+            TableIdentifier.parse(tableId()),
+            ICEBERG_SCHEMA,
+            PartitionSpec.unpartitioned(),
+            ImmutableMap.of("format-version", "2"));
+    List<Row> expectedRows = populateTable(table);
+    int deleteBelow = numRecords() / 2;
+
+    org.apache.iceberg.Schema deleteRowSchema = ICEBERG_SCHEMA.select("int_field");
+    OutputFile deleteOutputFile;
+    try (FileIO io = table.io()) {
+      deleteOutputFile = io.newOutputFile(table.location() + "/deletes-" + UUID.randomUUID());
+    }
+    EqualityDeleteWriter<Record> deleteWriter =
+        Parquet.writeDeletes(deleteOutputFile)
+            .createWriterFunc(GenericParquetWriter::create)
+            .overwrite()
+            .rowSchema(deleteRowSchema)
+            .withSpec(PartitionSpec.unpartitioned())
+            .equalityFieldIds(ICEBERG_SCHEMA.findField("int_field").fieldId())
+            .buildEqualityWriter();
+    try (EqualityDeleteWriter<Record> closingWriter = deleteWriter) {
+      for (int i = 0; i < deleteBelow; i++) {
+        GenericRecord deleteRecord = GenericRecord.create(deleteRowSchema);
+        deleteRecord.setField("int_field", i);
+        closingWriter.write(deleteRecord);
+      }
+    }
+    table.newRowDelta().addDeletes(deleteWriter.toDeleteFile()).commit();
+
+    List<String> expectedRemaining =
+        expectedRows.stream()
+            .filter(r -> checkStateNotNull(r.getInt32("int_field")) >= deleteBelow)
+            .map(r -> canonical(r.getString("str"), r.getInt32("int_field")))
+            .collect(Collectors.toList());
+
+    PCollection<String> afterDeletes =
+        pipeline
+            .apply(
+                "BQ read after deletes",
+                BigQueryIO.readTableRows().from(tableSpec).withMethod(Method.DIRECT_READ))
+            .apply(
+                "canonicalize after deletes",
+                MapElements.into(TypeDescriptors.strings())
+                    .via(tr -> canonical(tr.get("str"), tr.get("int_field"))));
+    PAssert.that(afterDeletes).containsInAnyOrder(expectedRemaining);
+    pipeline.run().waitUntilFinish();
+  }
+
+  @Test
+  public void testWriteReadWithFilter() throws IOException {
+    Table table = catalog.createTable(TableIdentifier.parse(tableId()), ICEBERG_SCHEMA);
+    List<Row> expectedRows =
+        populateTable(table).stream()
+            .filter(
+                row ->
+                    row.getBoolean("bool_field")
+                        && (row.getInt32("int_field") < 350 || row.getInt32("modulo_5") == 2))
+            .collect(Collectors.toList());
+    Map<String, Object> readConfig = new HashMap<>(managedIcebergConfig(tableId()));
+    readConfig.put("filter", "\"bool_field\" = TRUE AND (\"int_field\" < 350 OR \"modulo_5\" = 2)");
+    String writeTableId = tableId() + "_2";
+    Map<String, Object> writeConfig = managedIcebergConfig(writeTableId);
+
+    pipeline
+        .apply("read", Managed.read(ICEBERG).withConfig(readConfig))
+        .getSinglePCollection()
+        .apply("write", Managed.write(ICEBERG).withConfig(writeConfig));
+    pipeline.run().waitUntilFinish();
+
+    List<Record> returnedRecords =
+        readRecords(catalog.loadTable(TableIdentifier.parse(writeTableId)));
+    assertThat(
+        returnedRecords,
+        containsInAnyOrder(expectedRows.stream().map(RECORD_FUNC::apply).toArray()));
+  }
+
+  @Test
+  public void testReadWriteStreaming() throws IOException {
+    org.apache.iceberg.Schema schemaWithPk =
+        new org.apache.iceberg.Schema(ICEBERG_SCHEMA.columns(), ImmutableSet.of(1));
+    Table table = catalog.createTable(TableIdentifier.parse(tableId()), schemaWithPk);
+    List<Row> expectedRows = populateTable(table);
+
+    Map<String, Object> config = managedIcebergConfig(tableId());
+
+    Map<String, Object> readConfig = new HashMap<>(config);
+    readConfig.put("to_timestamp", System.currentTimeMillis());
+    readConfig.put("streaming", true);
+
+    String writeTableId = tableId() + "_2";
+    Map<String, Object> writeConfig = new HashMap<>(config);
+    writeConfig.put("triggering_frequency_seconds", 5);
+    writeConfig.put("table", writeTableId);
+
+    pipeline
+        .apply("streaming read", Managed.read(ICEBERG_CDC).withConfig(readConfig))
+        .getSinglePCollection()
+        .apply("streaming write", Managed.write(ICEBERG).withConfig(writeConfig));
+    pipeline.run().waitUntilFinish();
+
+    List<Record> returnedRecords =
+        readRecords(catalog.loadTable(TableIdentifier.parse(writeTableId)));
+    assertThat(
+        returnedRecords,
+        containsInAnyOrder(expectedRows.stream().map(RECORD_FUNC::apply).toArray()));
+  }
+
+  @Test
+  public void testWrite() throws IOException {
+    // Write with Beam
+    // Expect the sink to create the table
+    Map<String, Object> config = managedIcebergConfig(tableId());
+    PCollection<Row> input = pipeline.apply(Create.of(inputRows)).setRowSchema(BEAM_SCHEMA);
+    input.apply(Managed.write(ICEBERG).withConfig(config));
+    pipeline.run().waitUntilFinish();
+
+    Table table = catalog.loadTable(TableIdentifier.parse(tableId()));
+    assertEquals(BEAM_SCHEMA, icebergSchemaToBeamSchema(table.schema()));
+
+    // Read back and check records are correct
+    List<Record> returnedRecords = readRecords(table);
+    assertThat(
+        returnedRecords, containsInAnyOrder(inputRows.stream().map(RECORD_FUNC::apply).toArray()));
+  }
+
+  @Test
+  public void testWriteToPartitionedTable() throws IOException {
+    Map<String, Object> config = new HashMap<>(managedIcebergConfig(tableId()));
+    int truncLength = "value_x".length();
+    List<String> partitionFields =
+        Arrays.asList("bool_field", "hour(datetime)", "truncate(str, " + truncLength + ")");
+    config.put("partition_fields", partitionFields);
+    PCollection<Row> input = pipeline.apply(Create.of(inputRows)).setRowSchema(BEAM_SCHEMA);
+    input.apply(Managed.write(ICEBERG).withConfig(config));
+    pipeline.run().waitUntilFinish();
+
+    // Read back and check records are correct
+    Table table = catalog.loadTable(TableIdentifier.parse(tableId()));
+    List<Record> returnedRecords = readRecords(table);
+    PartitionSpec expectedSpec =
+        PartitionSpec.builderFor(table.schema())
+            .identity("bool_field")
+            .hour("datetime")
+            .truncate("str", truncLength)
+            .build();
+    assertEquals(expectedSpec, table.spec());
+    assertThat(
+        returnedRecords, containsInAnyOrder(inputRows.stream().map(RECORD_FUNC::apply).toArray()));
+  }
+
+  @Test
+  public void testWriteWithSortOrder() throws IOException {
+    Map<String, Object> config = new HashMap<>(managedIcebergConfig(tableId()));
+    config.put(
+        "sort_fields", Arrays.asList("int_field desc", "bucket(modulo_5, 4) asc nulls last"));
+    PCollection<Row> input = pipeline.apply(Create.of(inputRows)).setRowSchema(BEAM_SCHEMA);
+    input.apply(Managed.write(ICEBERG).withConfig(config));
+    pipeline.run().waitUntilFinish();
+
+    Table table = catalog.loadTable(TableIdentifier.parse(tableId()));
+    SortOrder order = table.sortOrder();
+    assertEquals(2, order.fields().size());
+    assertEquals(SortDirection.DESC, order.fields().get(0).direction());
+    assertEquals(NullOrder.NULLS_LAST, order.fields().get(0).nullOrder());
+    assertEquals(SortDirection.ASC, order.fields().get(1).direction());
+    assertEquals(NullOrder.NULLS_LAST, order.fields().get(1).nullOrder());
+
+    List<Record> returnedRecords = readRecords(table);
+    assertThat(
+        returnedRecords, containsInAnyOrder(inputRows.stream().map(RECORD_FUNC::apply).toArray()));
+  }
+
+  @Test
+  public void testWriteToPartitionedTableWithHashDistribution() throws IOException {
+    Map<String, Object> config = new HashMap<>(managedIcebergConfig(tableId()));
+    int truncLength = "value_x".length();
+    List<String> partitionFields =
+        Arrays.asList("bool_field", "hour(datetime)", "truncate(str, " + truncLength + ")");
+    config.put("partition_fields", partitionFields);
+    config.put("distribution_mode", "hash");
+    PCollection<Row> input = pipeline.apply(Create.of(inputRows)).setRowSchema(BEAM_SCHEMA);
+    input.apply(Managed.write(ICEBERG).withConfig(config));
+    pipeline.run().waitUntilFinish();
+
+    // Read back and check records are correct
+    Table table = catalog.loadTable(TableIdentifier.parse(tableId()));
+    List<Record> returnedRecords = readRecords(table);
+    PartitionSpec expectedSpec =
+        PartitionSpec.builderFor(table.schema())
+            .identity("bool_field")
+            .hour("datetime")
+            .truncate("str", truncLength)
+            .build();
+    assertEquals(expectedSpec, table.spec());
+    assertThat(
+        returnedRecords, containsInAnyOrder(inputRows.stream().map(RECORD_FUNC::apply).toArray()));
+  }
+
+  private PeriodicImpulse getStreamingSource() {
+    return PeriodicImpulse.create()
+        .stopAfter(Duration.millis(numRecords() - 1))
+        .withInterval(Duration.millis(1));
+  }
+
+  @Test
+  public void testStreamingWrite() throws IOException {
+    int numRecords = numRecords();
+
+    Map<String, Object> config = new HashMap<>(managedIcebergConfig(tableId()));
+    config.put("triggering_frequency_seconds", 4);
+    config.put("partition_fields", Arrays.asList("bool_field", "modulo_5"));
+    // Add table properties for testing
+    Map<String, String> tableProperties = new HashMap<>();
+    tableProperties.put("write.format.default", "parquet");
+    tableProperties.put("commit.retry.num-retries", "3");
+    config.put("table_properties", tableProperties);
+
+    // create elements from longs in range [0, 1000)
+    PCollection<Row> input =
+        pipeline
+            .apply(getStreamingSource())
+            .apply(
+                MapElements.into(TypeDescriptors.rows())
+                    .via(instant -> ROW_FUNC.apply(instant.getMillis() % numRecords)))
+            .setRowSchema(BEAM_SCHEMA);
+
+    assertThat(input.isBounded(), equalTo(UNBOUNDED));
+
+    input.apply(Managed.write(ICEBERG).withConfig(config));
+    pipeline.run().waitUntilFinish();
+
+    Table table = catalog.loadTable(TableIdentifier.parse(tableId()));
+    List<Record> returnedRecords = readRecords(table);
+    assertThat(
+        returnedRecords, containsInAnyOrder(inputRows.stream().map(RECORD_FUNC::apply).toArray()));
+    assertEquals("parquet", table.properties().get("write.format.default"));
+    assertEquals("3", table.properties().get("commit.retry.num-retries"));
+  }
+
+  @Test
+  public void testStreamingWriteWithPriorWindowing() throws IOException {
+    int numRecords = numRecords();
+
+    Map<String, Object> config = new HashMap<>(managedIcebergConfig(tableId()));
+    config.put("triggering_frequency_seconds", 4);
+    config.put("partition_fields", Arrays.asList("bool_field", "modulo_5"));
+
+    // over a span of 10 seconds, create elements from longs in range [0, 1000)
+    PCollection<Row> input =
+        pipeline
+            .apply(getStreamingSource())
+            .apply(
+                Window.<Instant>into(FixedWindows.of(Duration.standardSeconds(1)))
+                    .accumulatingFiredPanes())
+            .apply(
+                MapElements.into(TypeDescriptors.rows())
+                    .via(instant -> ROW_FUNC.apply(instant.getMillis() % numRecords)))
+            .setRowSchema(BEAM_SCHEMA);
+
+    assertThat(input.isBounded(), equalTo(UNBOUNDED));
+
+    input.apply(Managed.write(ICEBERG).withConfig(config));
+    pipeline.run().waitUntilFinish();
+
+    Table table = catalog.loadTable(TableIdentifier.parse(tableId()));
+    List<Record> returnedRecords = readRecords(table);
+    assertThat(
+        returnedRecords, containsInAnyOrder(inputRows.stream().map(RECORD_FUNC::apply).toArray()));
+  }
+
+  private void writeToDynamicDestinations(@Nullable String filterOp) throws IOException {
+    writeToDynamicDestinations(filterOp, false, false);
+  }
+
+  /**
+   * @param filterOp if null, just perform a normal dynamic destination write test; otherwise,
+   *     performs a simple filter on the record before writing. Valid options are "keep", "drop",
+   *     and "only"
+   */
+  private void writeToDynamicDestinations(
+      @Nullable String filterOp, boolean streaming, boolean partitioning) throws IOException {
+    int numRecords = numRecords();
+    String tableIdentifierTemplate = tableId() + "_{modulo_5}_{char}";
+    Map<String, Object> writeConfig = new HashMap<>(managedIcebergConfig(tableIdentifierTemplate));
+
+    List<String> fieldsToFilter = Arrays.asList("row", "str", "int_field", "nullable_long");
+    // an un-configured filter will just return the same row
+    RowFilter rowFilter = new RowFilter(BEAM_SCHEMA);
+    if (filterOp != null) {
+      switch (filterOp) {
+        case "drop":
+          rowFilter = rowFilter.drop(fieldsToFilter);
+          writeConfig.put(filterOp, fieldsToFilter);
+          break;
+        case "keep":
+          rowFilter = rowFilter.keep(fieldsToFilter);
+          writeConfig.put(filterOp, fieldsToFilter);
+          break;
+        case "only":
+          rowFilter = rowFilter.only(fieldsToFilter.get(0));
+          writeConfig.put(filterOp, fieldsToFilter.get(0));
+          break;
+        default:
+          throw new UnsupportedOperationException("Unknown operation: " + filterOp);
+      }
+    }
+
+    if (partitioning) {
+      Preconditions.checkState(filterOp == null || !filterOp.equals("only"));
+      writeConfig.put("partition_fields", Arrays.asList("bool_field", "modulo_5"));
+      writeConfig.put("distribution_mode", "hash");
+      writeConfig.put("autosharding", true);
+    }
+
+    // Write with Beam
+    PCollection<Row> input;
+    if (streaming) {
+      writeConfig.put("triggering_frequency_seconds", 5);
+      input =
+          pipeline
+              .apply(getStreamingSource())
+              .apply(
+                  MapElements.into(TypeDescriptors.rows())
+                      .via(instant -> ROW_FUNC.apply(instant.getMillis() % numRecords)));
+    } else {
+      input = pipeline.apply(Create.of(inputRows));
+    }
+
+    input.setRowSchema(BEAM_SCHEMA).apply(Managed.write(ICEBERG).withConfig(writeConfig));
+    pipeline.run().waitUntilFinish();
+
+    Table table0 = catalog.loadTable(TableIdentifier.parse(tableId() + "_0_a"));
+    Table table1 = catalog.loadTable(TableIdentifier.parse(tableId() + "_1_b"));
+    Table table2 = catalog.loadTable(TableIdentifier.parse(tableId() + "_2_c"));
+    Table table3 = catalog.loadTable(TableIdentifier.parse(tableId() + "_3_d"));
+    Table table4 = catalog.loadTable(TableIdentifier.parse(tableId() + "_4_e"));
+
+    for (Table t : Arrays.asList(table0, table1, table2, table3, table4)) {
+      assertEquals(rowFilter.outputSchema(), icebergSchemaToBeamSchema(t.schema()));
+    }
+
+    // Read back and check records are correct
+    List<List<Record>> returnedRecords =
+        Arrays.asList(
+            readRecords(table0),
+            readRecords(table1),
+            readRecords(table2),
+            readRecords(table3),
+            readRecords(table4));
+
+    org.apache.iceberg.Schema tableSchema = beamSchemaToIcebergSchema(rowFilter.outputSchema());
+    SerializableFunction<Row, Record> recordFunc =
+        row -> IcebergUtils.beamRowToIcebergRecord(tableSchema, row);
+
+    for (int i = 0; i < returnedRecords.size(); i++) {
+      List<Record> records = returnedRecords.get(i);
+      long l = i;
+      Stream<Record> expectedRecords =
+          inputRows.stream()
+              .filter(rec -> checkStateNotNull(rec.getInt64("modulo_5")) == l)
+              .map(rowFilter::filter)
+              .map(recordFunc::apply);
+
+      assertThat(records, containsInAnyOrder(expectedRecords.toArray()));
+    }
+  }
+
+  @Test
+  public void testWriteToDynamicDestinations() throws IOException {
+    writeToDynamicDestinations(null);
+  }
+
+  @Test
+  public void testWriteToDynamicDestinationsAndDropFields() throws IOException {
+    writeToDynamicDestinations("drop");
+  }
+
+  @Test
+  public void testWriteToDynamicDestinationsWithOnlyRecord() throws IOException {
+    writeToDynamicDestinations("only");
+  }
+
+  @Test
+  public void testStreamToDynamicDestinationsAndKeepFields() throws IOException {
+    writeToDynamicDestinations("keep", true, false);
+  }
+
+  @Test
+  public void testStreamToPartitionedDynamicDestinations() throws IOException {
+    writeToDynamicDestinations(null, true, true);
+  }
+
+  @Test
+  public void testWriteToDynamicNamespaces() throws IOException {
+    // run this test only on catalogs that support namespace management
+    assumeTrue(catalog instanceof SupportsNamespaces);
+
+    String tableIdentifierTemplate = namespace() + "_{modulo_5}.table_{bool_field}";
+    Map<String, Object> writeConfig = new HashMap<>(managedIcebergConfig(tableIdentifierTemplate));
+    // override with table template
+    writeConfig.put("table", tableIdentifierTemplate);
+
+    Namespace namespace0 = Namespace.of(namespace() + "_0");
+    Namespace namespace1 = Namespace.of(namespace() + "_1");
+    Namespace namespace2 = Namespace.of(namespace() + "_2");
+    Namespace namespace3 = Namespace.of(namespace() + "_3");
+    Namespace namespace4 = Namespace.of(namespace() + "_4");
+
+    TableIdentifier tableId0true = TableIdentifier.of(namespace0, "table_true");
+    TableIdentifier tableId0false = TableIdentifier.of(namespace0, "table_false");
+    TableIdentifier tableId1true = TableIdentifier.of(namespace1, "table_true");
+    TableIdentifier tableId1false = TableIdentifier.of(namespace1, "table_false");
+    TableIdentifier tableId2true = TableIdentifier.of(namespace2, "table_true");
+    TableIdentifier tableId2false = TableIdentifier.of(namespace2, "table_false");
+    TableIdentifier tableId3true = TableIdentifier.of(namespace3, "table_true");
+    TableIdentifier tableId3false = TableIdentifier.of(namespace3, "table_false");
+    TableIdentifier tableId4true = TableIdentifier.of(namespace4, "table_true");
+    TableIdentifier tableId4false = TableIdentifier.of(namespace4, "table_false");
+
+    List<Namespace> namespaces =
+        Arrays.asList(namespace0, namespace1, namespace2, namespace3, namespace4);
+    SupportsNamespaces sN = (SupportsNamespaces) catalog;
+    // assert namespace don't exist beforehand
+    namespaces.forEach(n -> assertFalse(sN.namespaceExists(n)));
+
+    pipeline
+        .apply(Create.of(inputRows))
+        .setRowSchema(BEAM_SCHEMA)
+        .apply(Managed.write(ICEBERG).withConfig(writeConfig));
+    pipeline.run().waitUntilFinish();
+
+    // assert namespace were created
+    namespaces.forEach(n -> assertTrue(sN.namespaceExists(n)));
+
+    Table table0true = catalog.loadTable(tableId0true);
+    Table table0false = catalog.loadTable(tableId0false);
+    Table table1true = catalog.loadTable(tableId1true);
+    Table table1false = catalog.loadTable(tableId1false);
+    Table table2true = catalog.loadTable(tableId2true);
+    Table table2false = catalog.loadTable(tableId2false);
+    Table table3true = catalog.loadTable(tableId3true);
+    Table table3false = catalog.loadTable(tableId3false);
+    Table table4true = catalog.loadTable(tableId4true);
+    Table table4false = catalog.loadTable(tableId4false);
+
+    for (Table t :
+        Arrays.asList(
+            table0true,
+            table0false,
+            table1true,
+            table1false,
+            table2true,
+            table2false,
+            table3true,
+            table3false,
+            table4true,
+            table4false)) {
+      assertEquals(BEAM_SCHEMA, icebergSchemaToBeamSchema(t.schema()));
+    }
+
+    // Read back and check records are correct
+    Map<KV<Long, Boolean>, List<Record>> results =
+        ImmutableMap.<KV<Long, Boolean>, List<Record>>builder()
+            .put(KV.of(0L, true), readRecords(table0true))
+            .put(KV.of(0L, false), readRecords(table0false))
+            .put(KV.of(1L, true), readRecords(table1true))
+            .put(KV.of(1L, false), readRecords(table1false))
+            .put(KV.of(2L, true), readRecords(table2true))
+            .put(KV.of(2L, false), readRecords(table2false))
+            .put(KV.of(3L, true), readRecords(table3true))
+            .put(KV.of(3L, false), readRecords(table3false))
+            .put(KV.of(4L, true), readRecords(table4true))
+            .put(KV.of(4L, false), readRecords(table4false))
+            .build();
+
+    for (Map.Entry<KV<Long, Boolean>, List<Record>> entry : results.entrySet()) {
+      long modulo = entry.getKey().getKey();
+      boolean bool = entry.getKey().getValue();
+      List<Record> records = entry.getValue();
+      Stream<Record> expectedRecords =
+          inputRows.stream()
+              .filter(
+                  rec ->
+                      checkStateNotNull(rec.getInt64("modulo_5")) == modulo
+                          && checkStateNotNull(rec.getBoolean("bool_field")) == bool)
+              .map(RECORD_FUNC::apply);
+
+      assertThat(records, containsInAnyOrder(expectedRecords.toArray()));
+    }
+
+    namespaces.stream().map(Namespace::toString).forEach(namespacesToCleanup::add);
+  }
+
+  public void runReadBetween(boolean useSnapshotBoundary, boolean streaming) throws Exception {
+    org.apache.iceberg.Schema schemaWithPk =
+        new org.apache.iceberg.Schema(ICEBERG_SCHEMA.columns(), ImmutableSet.of(1));
+    Table table = catalog.createTable(TableIdentifier.parse(tableId()), schemaWithPk);
+
+    populateTable(table, "a"); // first snapshot
+    Thread.sleep(AFTER_UPDATE_SLEEP_MS);
+    List<Row> expectedRows = populateTable(table, "b"); // second snapshot
+    Snapshot from = table.currentSnapshot();
+    Thread.sleep(AFTER_UPDATE_SLEEP_MS);
+    expectedRows.addAll(populateTable(table, "c")); // third snapshot
+    Snapshot to = table.currentSnapshot();
+    Thread.sleep(AFTER_UPDATE_SLEEP_MS);
+    populateTable(table, "d"); // fourth snapshot
+    Thread.sleep(AFTER_UPDATE_SLEEP_MS);
+
+    Map<String, Object> config = new HashMap<>(managedIcebergConfig(tableId()));
+    if (useSnapshotBoundary) {
+      config.put("from_snapshot", from.snapshotId());
+      config.put("to_snapshot", to.snapshotId());
+    } else { // use timestamp boundary
+      config.put("from_timestamp", from.timestampMillis() - 1);
+      config.put("to_timestamp", to.timestampMillis() + 1);
+    }
+    config.put("streaming", streaming);
+
+    PCollection<Row> rows =
+        pipeline.apply(Managed.read(ICEBERG_CDC).withConfig(config)).getSinglePCollection();
+
+    IsBounded expectedBoundedness = streaming ? UNBOUNDED : BOUNDED;
+    assertEquals(expectedBoundedness, rows.isBounded());
+
+    PAssert.that(rows).containsInAnyOrder(expectedRows);
+    pipeline.run().waitUntilFinish();
+  }
+
+  private Table createCdcTable() {
+    return catalog.createTable(
+        TableIdentifier.parse(tableId()),
+        CDC_ICEBERG_SCHEMA,
+        PartitionSpec.unpartitioned(),
+        ImmutableMap.of(
+            TableProperties.FORMAT_VERSION,
+            "2",
+            TableProperties.SPLIT_SIZE,
+            "1",
+            TableProperties.DEFAULT_WRITE_METRICS_MODE,
+            "full"));
+  }
+
+  private static String cdcChange(ValueKind valueKind, Snapshot snapshot, long id, String data) {
+    return String.format("%s:%d:%d:%s", valueKind, snapshot.timestampMillis(), id, data);
+  }
+
+  private static Row cdcMetadataRow(
+      long id, String data, Snapshot snapshot, long rowId, Schema outputSchema) {
+    return Row.withSchema(outputSchema)
+        .addValues(
+            id,
+            data,
+            ChangelogOperation.INSERT.name(),
+            snapshot.snapshotId(),
+            snapshot.sequenceNumber(),
+            rowId,
+            snapshot.sequenceNumber())
+        .build();
+  }
+
+  private static Record cdcRecord(org.apache.iceberg.Schema schema, long id, String data) {
+    GenericRecord record = GenericRecord.create(schema);
+    record.setField("id", id);
+    if (schema.findField("data") != null) {
+      record.setField("data", data);
+    }
+    return record;
+  }
+
+  private DataFile commitCdcAppend(Table table, String filename, List<Record> records)
+      throws IOException {
+    DataFile dataFile = writeCdcDataFile(table, filename, records);
+    table.newFastAppend().appendFile(dataFile).commit();
+    table.refresh();
+    return dataFile;
+  }
+
+  private DataFile writeCdcDataFile(Table table, String filename, List<Record> records)
+      throws IOException {
+    OutputFile file =
+        table.io().newOutputFile(table.location() + "/" + UUID.randomUUID() + "-" + filename);
+    DataWriter<Record> writer =
+        Parquet.writeData(file)
+            .schema(table.schema())
+            .createWriterFunc(GenericParquetWriter::create)
+            .overwrite()
+            .withSpec(table.spec())
+            .build();
+
+    try (writer) {
+      for (Record record : records) {
+        writer.write(record);
+      }
+    }
+
+    return writer.toDataFile();
+  }
+
+  private DeleteFile writeCdcEqualityDelete(Table table, String filename, long id)
+      throws IOException {
+    org.apache.iceberg.Schema deleteSchema = table.schema().select("id");
+    GenericAppenderFactory appenderFactory =
+        new GenericAppenderFactory(table.schema(), table.spec(), new int[] {1}, deleteSchema, null);
+    EqualityDeleteWriter<Record> writer =
+        appenderFactory.newEqDeleteWriter(
+            EncryptedFiles.plainAsEncryptedOutput(
+                table
+                    .io()
+                    .newOutputFile(table.location() + "/" + UUID.randomUUID() + "-" + filename)),
+            FileFormat.PARQUET,
+            null);
+
+    try (writer) {
+      writer.write(cdcRecord(deleteSchema, id, null));
+    }
+
+    return writer.toDeleteFile();
+  }
+
+  private DeleteFile writeCdcPositionDelete(
+      Table table, String filename, DataFile dataFile, long... positions) throws IOException {
+    GenericAppenderFactory appenderFactory =
+        new GenericAppenderFactory(table.schema(), table.spec());
+    PositionDeleteWriter<Record> writer =
+        appenderFactory.newPosDeleteWriter(
+            EncryptedFiles.plainAsEncryptedOutput(
+                table
+                    .io()
+                    .newOutputFile(table.location() + "/" + UUID.randomUUID() + "-" + filename)),
+            FileFormat.PARQUET,
+            null);
+
+    try (writer) {
+      for (long position : positions) {
+        writer.write(PositionDelete.<Record>create().set(dataFile.location(), position));
+      }
+    }
+
+    return writer.toDeleteFile();
+  }
+
+  private static final class FormatCdcChange extends DoFn<Row, String> {
+    @ProcessElement
+    public void process(
+        @Element Row row,
+        ValueKind valueKind,
+        @DoFn.Timestamp Instant timestamp,
+        OutputReceiver<String> outputReceiver) {
+      outputReceiver.output(
+          String.format(
+              "%s:%d:%d:%s",
+              valueKind, timestamp.getMillis(), row.getInt64("id"), row.getString("data")));
+    }
+  }
+
+  @Test
+  public void testWriteWithTableProperties() throws IOException {
+    Map<String, Object> config = new HashMap<>(managedIcebergConfig(tableId()));
+    Map<String, String> tableProperties = new HashMap<>();
+    tableProperties.put("write.format.default", "parquet");
+    tableProperties.put("commit.retry.num-retries", "3");
+    config.put("table_properties", tableProperties);
+    PCollection<Row> input = pipeline.apply(Create.of(inputRows)).setRowSchema(BEAM_SCHEMA);
+    input.apply(Managed.write(ICEBERG).withConfig(config));
+    pipeline.run().waitUntilFinish();
+
+    Table table = catalog.loadTable(TableIdentifier.parse(tableId()));
+    // Read back and check records are correct
+    List<Record> returnedRecords = readRecords(table);
+    assertThat(
+        returnedRecords, containsInAnyOrder(inputRows.stream().map(RECORD_FUNC::apply).toArray()));
+    // Assert that the table properties are set on the Iceberg table
+    assertEquals("parquet", table.properties().get("write.format.default"));
+    assertEquals("3", table.properties().get("commit.retry.num-retries"));
+  }
+}

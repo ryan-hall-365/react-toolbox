@@ -1,0 +1,19 @@
+RewriteEngine On
+
+# Javadocs / pydocs are available only on the published website, published from
+# https://github.com/apache/beam-site/tree/release-docs
+# They were previously hosted within this repository, and published at the URL
+# path /documentation/sdks/(javadoc|pydoc)/..
+# The following redirect maintains the previously supported URLs.
+RedirectMatch permanent "/documentation/sdks/(javadoc|pydoc)(.*)" "https://beam.apache.org/releases/$1$2"
+
+RedirectMatch "/contribute/design-documents" "https://cwiki.apache.org/confluence/display/BEAM/Design+Documents"
+
+RedirectMatch "/contribute/release-guide" "https://github.com/apache/beam/blob/master/contributor-docs/release-guide.md"
+
+RedirectMatch "/contribute/committer-guide" "https://github.com/apache/beam/blob/master/contributor-docs/committer-guide.md"
+
+# Allow embedding content from play.beam.apache.org, youtube.com, drive.google.com, platform.twitter.com,
+# static.hotjar.com, cse.google.com, www.google.com/cse, clients1.google.com and fonts.gstatic.com.
+# This is the standard way to add local exceptions to the CSP, see https://infra.apache.org/tools/csp.html
+SetEnv CSP_PROJECT_DOMAINS "https://play.beam.apache.org/ https://www.youtube.com/ https://drive.google.com/ https://platform.twitter.com/ https://static.hotjar.com/ https://cse.google.com/ http://cse.google.com/ https://www.google.com/cse/ https://fonts.gstatic.com/"
