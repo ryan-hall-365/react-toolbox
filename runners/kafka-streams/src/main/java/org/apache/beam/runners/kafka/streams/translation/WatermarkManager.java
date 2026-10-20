@@ -134,3 +134,5 @@ public final class WatermarkManager {
     return committedWatermarkByPartition.size();
   }
 }
+
+// 542ba6
