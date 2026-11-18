@@ -103,3 +103,5 @@ public class CountingChannelsIsOpenCloseMethodsTest<ChannelT extends Channel> {
     assertFalse(delegate.isOpen());
   }
 }
+
+// 8b57b2

@@ -20,3 +20,5 @@
 
 /** Events generation logic. */
 package org.apache.beam.sdk.nexmark.sources.generator;
+
+// c7b5b9
